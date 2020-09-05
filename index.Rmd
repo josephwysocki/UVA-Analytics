@@ -1,0 +1,28 @@
+<br>  
+
+
+## <img width="75" alt="SabreV " src="pictures/UVA.png"> **Virginia Cavaliers Analytics** 
+
+Welcome to the Virginia Cavaliers website. Here is where reports and analysis will be housed for the duration of the 2020 season. 
+<br>
+ 
+
+#### **Site Navigation**  
+* [About](about.html)
+* [Drive Summaries](test_table.html)
+<br>  
+ 
+  
+#### **2020 Opponents**
+Select a team to go to their page. I imagine that eventually we can have a page for each opponent that includes multiple tables and other useful information. We can build these out over time, and the buttons below would link to the pages as we added them.
+
+<img width="225" alt="Virginia Tech" src="pictures/VT.png">
+<img width="225" alt="Clemson" src="pictures/Clemson.png">
+<img width="225" alt="NC State" src="pictures/nsstate.png">
+<img width="225" alt="Wake Forest" src="pictures/wake.png">
+<img width="225" alt="Miami" src="pictures/miami.png">
+<img width="230" alt="UNC" src="pictures/UNC.png">
+<img width="225" alt="Louisville" src="pictures/louisville.png">
+<img width="225" alt="Duke" src="pictures/duke.png">
+<img width="225" alt="Florida State" src="pictures/fsu.png">
+<img width="227" alt="Boston College" src="pictures/bc.png">
