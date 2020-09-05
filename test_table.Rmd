@@ -1,30 +1,28 @@
 ---
-title: "Test Table"
-author: "Joseph Wysocki"
-date: "9/5/2020"
+title: ""
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
 output: html_document
 ---
+<br>  
+
+
+## **Drive Summaries**  
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+This is a dummy page showing how the tables produced by rectable appear online. We can add as much or as little to these pages as we wish - whatever is deemed most important for the users. As we get more complex with what we want to include, we can either add all of the tables here are create new pages for specific sub-sections of pages. Up to the team!
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r, include=FALSE}
+library(reactable)
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r table, echo=FALSE}
+reactable(iris)
 ```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
