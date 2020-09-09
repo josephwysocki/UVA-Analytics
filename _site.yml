@@ -6,10 +6,8 @@ navbar:
   left:
     - text: "Home"
       href: index.html
-    - text: "About"
-      href: about.html
-    - text: "Drive Summaries"
-      href: test_table.html
+    - text: "2020 NCAA Stats"
+      href: ncaa_stats_2020.html
 
 
 output:

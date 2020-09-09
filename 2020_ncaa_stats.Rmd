@@ -1,0 +1,2746 @@
+---
+title: "2020 NCAA Stats"
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+# {.tabset}
+
+```{r setup, include=FALSE}
+#Load packages
+easypackages::libraries("tidyverse", "httr", "reactable", "htmltools", "jsonlite", "readr", "dplyr", "magick", "stringr")
+
+#color stuff for tables 
+sticky_style <- list(position = "sticky", left = 0, background = "#fff", zIndex = 1,
+                     borderRight = "1px solid #eee")
+col_pal_good <- function(x) rgb(colorRamp(c("red3", "white", "forestgreen"))(x), maxColorValue = 255)
+col_pal_bad <- function(x) rgb(colorRamp(c("forestgreen", "white", "red3"))(x), maxColorValue = 255)
+
+my_api_key <-'5da2a45fee5e9b87fcbcc2fbca2944a9491ce0b462968498e8eae560b55b109e'
+
+get_jwt <- POST("https://api.profootballfocus.com/auth/login",
+                query=list('api_key'=my_api_key))
+get_jwt
+my_jwt <- content(get_jwt)$jwt[1]
+# my_jwt
+
+test <- GET(paste0('https://api.profootballfocus.com/v1/video/ncaa/2020/plays'),
+            add_headers(Authorization = paste0('Bearer ', my_jwt),
+                        'Accept-Encoding' = 'gzip',
+                        'Content-Encoding' = 'gzip'),
+             encode = "json")
+
+test$status_code # as long as this says 200, you're good to go
+
+df <- content(test, "text") %>% 
+  fromJSON(flatten = T)
+
+this.content.df <- do.call(what = "rbind",
+                           args = lapply(df, as.data.frame))
+
+this.content.df <- this.content.df[,sort(names(this.content.df))]
+
+this.content.df <- this.content.df %>% arrange(game_id, play_id)
+pbp <- this.content.df %>% arrange(game_id, play_id)
+
+pbp$field_position <- as.numeric(pbp$field_position)
+pbp$NewFPos = ifelse(pbp$field_position < 0, 100+pbp$field_position, pbp$field_position)
+pbp$Gain.Loss = ifelse(pbp$no_play == 1, NA,
+                                       ifelse(!is.na(pbp$interception), NA,
+                                              ifelse(!is.na(pbp$fumble), pbp$gain_loss,
+                                                     ifelse(!is.na(pbp$penalty), pbp$gain_loss,
+                                                            pbp$gain_loss_net))))
+pbp$DrivePlayNext = c(pbp$drive_play[-c(1)],0)
+pbp$BigPlay = ifelse(pbp$Gain.Loss >= 15, 1, 0)
+pbp$ChunkPlay = ifelse(pbp$Gain.Loss >= 10, 1,0)
+pbp$TFL = ifelse(pbp$Gain.Loss < 0 & is.na(pbp$sack) & pbp$primary_run_concept != "UNDEFINED" & pbp$no_play != 1, 1, 0)
+pbp$uniqueID = paste(pbp$game_id, pbp$offense, pbp$drive, sep="")
+pbp$uniqueOpponentID = paste(pbp$game_id, pbp$defense, pbp$drive, sep="")
+pbp$FieldZone = ifelse(pbp$NewFPos > 90, "CO",
+                                       ifelse(pbp$NewFPos <= 90 & pbp$NewFPos > 40, "OF",
+                                              ifelse(pbp$NewFPos <= 40 & pbp$NewFPos > 20, "SZ", "RZ")))
+pbp$Down.Next = c(pbp$down[-c(1)],0)
+pbp$Qtr.Next = c(pbp$quarter[-c(1)],0)
+pbp$Is.Halftime = ifelse(pbp$quarter == 2 & pbp$Qtr.Next == 3, "Y", "N")
+pbp$Is.EndGame = ifelse(pbp$quarter == 4 & pbp$Qtr.Next == 1, "Y", "N")
+pbp$uniqueOffGameID = paste(pbp$game_id, pbp$offense, sep = ",")
+pbp$uniqueDefGameID = paste(pbp$game_id, pbp$defense, sep = ",")
+pbp$PassArea = ifelse(pbp$pass_depth < 0 & pbp$pass_zone %in% c("1L", "2L", "3L"), 1,
+                ifelse(pbp$pass_depth < 0 & pbp$pass_zone %in% c("4"), 2,
+                 ifelse(pbp$pass_depth < 0 & pbp$pass_zone %in% c("5R", "6R", "7R"), 3,
+                  ifelse(pbp$pass_depth >= 0 & pbp$pass_depth < 5 & pbp$pass_zone %in% c("1L", "2L", "3L"), 4,
+                   ifelse(pbp$pass_depth >= 0 & pbp$pass_depth < 5 & pbp$pass_zone %in% c("4"), 5,
+                    ifelse(pbp$pass_depth >= 0 & pbp$pass_depth < 5 & pbp$pass_zone %in% c("5R", "6R", "7R"), 6,
+                     ifelse(pbp$pass_depth >= 5 & pbp$pass_depth < 15 & pbp$pass_zone %in% c("1L", "2L", "3L"), 7,
+                      ifelse(pbp$pass_depth >= 5 & pbp$pass_depth < 15 & pbp$pass_zone %in% c("4"), 8,
+                       ifelse(pbp$pass_depth >= 5 & pbp$pass_depth < 15 & pbp$pass_zone %in% c("5R", "6R", "7R"), 9,
+                        ifelse(pbp$pass_depth >= 15 & pbp$pass_depth < 25 & pbp$pass_zone %in% c("1L", "2L", "3L"), 10,
+                         ifelse(pbp$pass_depth >= 15 & pbp$pass_depth < 25 & pbp$pass_zone %in% c("4"), 11,
+                          ifelse(pbp$pass_depth >= 15 & pbp$pass_depth < 25 & pbp$pass_zone %in% c("5R", "6R", "7R"), 12,
+                           ifelse(pbp$pass_depth >= 25 & pbp$pass_zone %in% c("1L", "2L", "3L"), 13,
+                            ifelse(pbp$pass_depth >= 25 & pbp$pass_zone %in% c("4"), 14,
+                             ifelse(pbp$pass_depth >= 25 & pbp$pass_zone %in% c("5R", "6R", "7R"), 15, NA)))))))))))))))
+pbp$Drive.End.Next = c(pbp$drive_end_event[-c(1)],0)
+
+pbp$Turnover = ifelse(pbp$drive_end_event == "FUMBLE" & pbp$DrivePlayNext == 1, 1,
+                ifelse(pbp$drive_end_event == "INTERCEPTION" & pbp$DrivePlayNext == 1, 1,
+                 ifelse(pbp$drive_end_event == "INTERCEPTION-TD" & pbp$Drive.End.Next != "INTERCEPTION-TD", 1,
+                  ifelse(pbp$drive_end_event == "FUMBLE-TD" & pbp$Drive.End.Next != "FUMBLE-TD", 1, NA))))
+
+pbp$Efficient = ifelse(!is.na(pbp$Turnover), 0,
+                 ifelse(pbp$no_play == 1, NA,
+                  ifelse(pbp$down==1, 
+                   ifelse(pbp$Gain.Loss >= (pbp$distance*.4), 1, 0),
+                    ifelse(pbp$down==2, 
+                     ifelse(pbp$Gain.Loss >= (pbp$distance*.5), 1, 0),
+                      ifelse(pbp$down==3, 
+                       ifelse(pbp$Gain.Loss >= pbp$distance, 1, 0),
+                        ifelse(pbp$down==4, 
+                         ifelse(pbp$Gain.Loss >= pbp$distance, 1, 0), NA))))))
+pbp$FieldBoundary = ifelse(pbp$hash == "L" & pbp$pass_zone %in% c("1L", "2L", "3L"),"B",
+                     ifelse(pbp$hash == "L" & pbp$pass_zone %in% c("5R", "6R", "7R"),"F",
+                      ifelse(pbp$hash == "R" & pbp$pass_zone %in% c("1L", "2L", "3L"),"F",
+                       ifelse(pbp$hash == "R" & pbp$pass_zone %in% c("5R", "6R", "7R"),"B",
+                        ifelse(pbp$pass_zone == "4", "M",NA)))))
+pbp$PassDepthZones = ifelse(pbp$pass_depth <= 0, 1,
+                      ifelse(pbp$pass_depth > 0 & pbp$pass_depth <= 5, 2,
+                       ifelse(pbp$pass_depth > 5 & pbp$pass_depth <= 10, 3,
+                        ifelse(pbp$pass_depth > 10 & pbp$pass_depth <= 15, 4,
+                         ifelse(pbp$pass_depth > 15 & pbp$pass_depth <= 20, 5,
+                          ifelse(pbp$pass_depth > 20 & pbp$pass_depth <= 25, 6,
+                           ifelse(pbp$pass_depth > 25 & pbp$pass_depth <= 30, 7,
+                            ifelse(pbp$pass_depth > 30 & pbp$pass_depth <= 35, 8,
+                             ifelse(pbp$pass_depth > 35 & pbp$pass_depth <= 40, 9,
+                              ifelse(pbp$pass_depth > 40 & pbp$pass_depth <= 45, 10,
+                               ifelse(pbp$pass_depth > 45 & pbp$pass_depth <= 50, 11, 
+                                ifelse(pbp$pass_depth > 50, 12, NA))))))))))))
+
+pbp$PassWidthZones = ifelse(pbp$pass_width < 8, 1,
+                      ifelse(pbp$pass_width > 7 & pbp$pass_width < 15, 2,
+                       ifelse(pbp$pass_width > 14 & pbp$pass_width < 22, 3,
+                        ifelse(pbp$pass_width > 21 & pbp$pass_width < 32, 4,
+                         ifelse(pbp$pass_width > 31 & pbp$pass_width < 39, 5,
+                          ifelse(pbp$pass_width > 38 & pbp$pass_width < 46, 6, 7))))))
+
+pbp$PassZones = pbp$PassWidthZones + ((pbp$PassDepthZones-1)*7)
+
+pbp$PositionTarget = ifelse(pbp$pass_receiver_target_position %in% c("TE-iL", "TE-iR", "TE-L", "TE-R", "TE-oL", "TE-oR"), "TE",
+                      ifelse(pbp$pass_receiver_target_position %in% c("RWR", "LWR"), "WR",
+                       ifelse(pbp$pass_receiver_target_position %in% c("HB", "HB-L", "HB-R", "FB", "FB-L", "FB-R"), "RB",
+                        ifelse(pbp$pass_receiver_target_position %in% c("SLoWR", "SLWR", "SRiWR", "SRWR", "SLiWR", "SRoWR"), "Slot", NA))))
+
+pbp$DownType = ifelse(pbp$down == 1, "SD",
+                ifelse(pbp$down == 2 & pbp$distance < 8, "SD",
+                 ifelse(pbp$down == 3 & pbp$distance < 5, "SD",
+                  ifelse(pbp$down == 4 & pbp$distance < 5, "SD", "PD" ))))
+pbp$pass_blocking_number <- substr(pbp$pass_blocking_players, 1, 1)
+pbp$play_end_field_position_number <- as.numeric(substr(pbp$play_end_field_position, 2, 3))
+
+pbp$DrivePoints = ifelse(pbp$drive_end_event == "TOUCHDOWN", 7,
+                   ifelse(pbp$drive_end_event == "FIELD GOAL", 3,
+                    ifelse(pbp$drive_end_event == "INTERCEPTION-TD", -7,
+                     ifelse(pbp$drive_end_event == "FUMBLE-TD", -7, 
+                      ifelse(pbp$drive_end_event == "SAFETY", -2, 0)))))
+pbp$DriveSuccess = ifelse(pbp$drive_end_event == "TOUCHDOWN" | pbp$drive_end_event == "FIELD GOAL" | pbp$drive_end_event == "MISSED FG", 1,0)
+
+pbp$DriveReturnStart = lag(pbp$return_yards)
+pbp$SpecialTeamsDriveStart = lag(pbp$special_teams_type)
+pbp$PreviousGainLoss = lag(pbp$gain_loss_net)
+
+All_Team_Names <- read.csv("New Team Names.csv")
+names(All_Team_Names)[names(All_Team_Names)=="ï..TeamCode"] <- "TeamCode"
+NCAA_Team_Names <- All_Team_Names %>% filter(NFL != 1) %>% select(TeamCode, Team.Name, Conf, PrimaryColor, SecondaryColor, Logo)
+Teams <- All_Team_Names %>% filter(FBS == 1) %>% select(TeamCode, Team.Name, Conf, PrimaryColor, SecondaryColor, Logo)
+FBSSchools <- Teams$TeamCode
+
+dat <- Teams %>% separate(Logo, c("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"), sep = "/") 
+
+dat1 <- dat %>% mutate(j = str_replace_all(dat$j, "[^[:alnum:]]", "")) %>% separate(j, c("teamcode", "junk"), sep = "p") %>% select(-c("a", "b", "c", "d", "e", "f", "g", "h", "i", "junk")) %>% rename(TeamName = Team.Name)
+
+pbp <- merge(pbp, NCAA_Team_Names, by.x = "offense", by.y = "TeamCode", sort = FALSE)
+pbp <- merge(pbp, NCAA_Team_Names, by.x = "defense", by.y = "TeamCode", sort = FALSE)
+colnames(pbp)[colnames(pbp) == "Team.Name.x"] = "OffTeamName"
+colnames(pbp)[colnames(pbp) == "Team.Name.y"] = "DefTeamName"
+colnames(pbp)[colnames(pbp) == "Logo.x"] = "OffTeamLogo"
+colnames(pbp)[colnames(pbp) == "Logo.y"] = "DefTeamLogo"
+colnames(pbp)[colnames(pbp) == "Conf.x"] = "OffTeamConference"
+colnames(pbp)[colnames(pbp) == "Conf.y"] = "DefTeamConference"
+colnames(pbp)[colnames(pbp) == "PrimaryColor.x"] = "OffPrimaryColor"
+colnames(pbp)[colnames(pbp) == "PrimaryColor.y"] = "DefPrimaryColor"
+colnames(pbp)[colnames(pbp) == "SecondaryColor.x"] = "OffSecondaryColor"
+colnames(pbp)[colnames(pbp) == "SecondaryColor.y"] = "DefSecondaryColor"
+pbp <- pbp %>% mutate(OffTeamName = as.character(OffTeamName), DefTeamName = as.character(DefTeamName), OffTeamLogo = as.character(OffTeamLogo),
+                      DefTeamLogo = as.character(DefTeamLogo), OffTeamConference = as.character(OffTeamConference), DefTeamConference = as.character(DefTeamConference),
+                      OffPrimaryColor = as.character(OffPrimaryColor), DefPrimaryColor = as.character(DefPrimaryColor), OffSecondaryColor = as.character(OffSecondaryColor),
+                      DefSecondaryColor = as.character(DefSecondaryColor))
+
+NoKicks = subset(pbp, !is.na(pbp$drive))
+FBSvsFBS = subset(NoKicks, offense %in% FBSSchools & defense %in% FBSSchools)
+FBSvsFBSNoGarbage = subset(FBSvsFBS, garbage_time == 0)
+FBSOff = subset(NoKicks, offense %in% FBSSchools)
+FBSDef = subset(NoKicks, defense %in% FBSSchools)
+TotalPlaysOff = FBSOff %>% group_by(OffTeamName) %>% summarize(TotalPlaysOff = n()) %>% rename(TeamName = OffTeamName)
+TotalPlaysDef = FBSDef %>% group_by(DefTeamName) %>% summarize(TotalPlaysDef = n()) %>% rename(TeamName = DefTeamName)
+
+
+MostOffDriveThings <- FBSOff %>% group_by(uniqueID) %>% summarize(Plays = n(), Yards = sum(Gain.Loss, na.rm = TRUE), YPP = mean(Gain.Loss, na.rm = TRUE),
+                                                                  AvgEPA = mean(expected_points_added, na.rm = TRUE), Efficiency = mean(Efficient, na.rm = TRUE), 
+                                                                  FirstDowns = sum(first_down_gained, na.rm = TRUE), LargeGain = max(Gain.Loss, na.rm = TRUE),
+                                                                  Sacks = sum(!is.na(sack)), TFL = sum(TFL, na.rm = TRUE), ForcedFumbles = sum(!is.na(forced_fumble)),
+                                                                  Interception = sum(!is.na(interception)), BP = sum(incompletion_type == "BP", na.rm = TRUE), PD = sum(incompletion_type == "PD", na.rm = TRUE),
+                                                                  FarthestFPos = min(NewFPos, na.rm = TRUE)) %>% 
+  mutate(TotalTFL = Sacks + TFL, Havoc = TotalTFL + ForcedFumbles + PD + BP, RedZoneOpportunity = ifelse(FarthestFPos <=20, 1, 0)) %>% select(-BP,PD,FarthestFPos)
+
+OffDriveBigPlays <- FBSOff %>% group_by(uniqueID) %>% filter(Gain.Loss >= 15) %>% summarize(BigPlays = n())
+FirstDownEfficiency <- FBSOff %>% group_by(uniqueID) %>% filter(down == 1) %>% summarize(FirstDownEfficiency = mean(Efficient, na.rm = TRUE))
+SecondDownEfficiency <- FBSOff %>% group_by(uniqueID) %>% filter(down == 2) %>% summarize(SecondDownEfficiency = mean(Efficient, na.rm = TRUE))
+ThirdDownEfficiency <- FBSOff %>% group_by(uniqueID) %>% filter(down == 3) %>% summarize(ThirdDownEfficiency = mean(Efficient, na.rm = TRUE))
+ScoringOpportunity <- FBSOff %>% group_by(uniqueID) %>% filter(down == 1) %>% summarize(FarthestFPos = min(NewFPos, na.rm = TRUE)) %>% mutate(ScoringOpportunity = ifelse(FarthestFPos <=40, 1, 0)) %>% select(-FarthestFPos)
+
+
+
+RestofOffDriveThings <- FBSOff %>% group_by(uniqueID) %>% filter(drive_play == 1) %>% select(game_id, OffTeamName, DefTeamName, drive, NewFPos, drive_start_event, SpecialTeamsDriveStart, PreviousGainLoss, drive_end_event, score_differential, drive_end_field_position,
+                                                                                             DrivePoints, two_minute, DriveSuccess, DriveReturnStart) %>% mutate(ScoringDrive = ifelse(DrivePoints > 0, 1, 0))
+
+OffenseDriveDataFrame <- merge(MostOffDriveThings, RestofOffDriveThings, all=TRUE) %>% merge(OffDriveBigPlays, all = TRUE) %>% merge(FirstDownEfficiency, all = TRUE) %>% merge(SecondDownEfficiency, all = TRUE) %>%
+  merge(ThirdDownEfficiency, all = TRUE) %>% merge(ScoringOpportunity, all = TRUE)
+
+MostDefDriveThings <- FBSDef %>% group_by(uniqueOpponentID) %>% summarize(Plays = n(), Yards = sum(Gain.Loss, na.rm = TRUE), YPP = mean(Gain.Loss, na.rm = TRUE),
+                                                                          AvgEPA = mean(expected_points_added, na.rm = TRUE), Efficiency = mean(Efficient, na.rm = TRUE), 
+                                                                          FirstDowns = sum(first_down_gained, na.rm = TRUE), LargeGain = max(Gain.Loss, na.rm = TRUE),
+                                                                          Sacks = sum(!is.na(sack)), TFL = sum(TFL, na.rm = TRUE), ForcedFumbles = sum(!is.na(forced_fumble)),
+                                                                          Interception = sum(!is.na(interception)), BP = sum(incompletion_type == "BP", na.rm = TRUE), PD = sum(incompletion_type == "PD", na.rm = TRUE),
+                                                                          FarthestFPos = min(NewFPos, na.rm = TRUE)) %>% 
+  mutate(TotalTFL = Sacks + TFL, Havoc = TotalTFL + ForcedFumbles + PD + BP, RedZoneOpportunity = ifelse(FarthestFPos <=20, 1, 0)) %>% select(-BP,PD,FarthestFPos)
+
+DefDriveBigPlays <- FBSDef %>% group_by(uniqueOpponentID) %>% filter(Gain.Loss >= 15) %>% summarize(BigPlays = n())
+FirstDownEfficiency <- FBSDef %>% group_by(uniqueOpponentID) %>% filter(down == 1) %>% summarize(FirstDownEfficiency = mean(Efficient, na.rm = TRUE))
+SecondDownEfficiency <- FBSDef %>% group_by(uniqueOpponentID) %>% filter(down == 2) %>% summarize(SecondDownEfficiency = mean(Efficient, na.rm = TRUE))
+ThirdDownEfficiency <- FBSDef %>% group_by(uniqueOpponentID) %>% filter(down == 3) %>% summarize(ThirdDownEfficiency = mean(Efficient, na.rm = TRUE))
+ScoringOpportunity <- FBSDef %>% group_by(uniqueOpponentID) %>% filter(down == 1) %>% summarize(FarthestFPos = min(NewFPos, na.rm = TRUE)) %>% mutate(ScoringOpportunity = ifelse(FarthestFPos <=40, 1, 0)) %>% select(-FarthestFPos)
+
+RestofDefDriveThings <- FBSDef %>% group_by(uniqueOpponentID) %>% filter(drive_play == 1) %>% select(game_id, OffTeamName, DefTeamName, drive, NewFPos, drive_start_event, drive_end_event, score_differential, drive_end_field_position,
+                                                                                                     DrivePoints, two_minute, DriveSuccess, DriveReturnStart) %>% mutate(ScoringDrive = ifelse(DrivePoints > 0, 1, 0))
+
+DefenseDriveDataFrame <- merge(MostDefDriveThings, RestofDefDriveThings, all=TRUE) %>% merge(DefDriveBigPlays, all = TRUE) %>% merge(FirstDownEfficiency, all = TRUE) %>% merge(SecondDownEfficiency, all = TRUE) %>%
+  merge(ThirdDownEfficiency, all = TRUE) %>% merge(ScoringOpportunity, all = TRUE)
+
+
+```
+
+## Special Teams
+```{r all, echo= FALSE, warning=FALSE, message = FALSE}
+PuntReturns <- pbp %>% group_by(DefTeamName) %>% filter(defense %in% FBSSchools) %>% filter(special_teams_type == "PUNT") %>% summarize(AvgPuntReturn = mean(return_yards, na.rm = TRUE)) %>% arrange(desc(AvgPuntReturn)) %>% mutate(PuntReturnsRank = rank(desc(AvgPuntReturn), ties.method="first")) %>% rename(TeamName = DefTeamName) 
+
+KickOffASFPos <- pbp %>% group_by(DefTeamName) %>% filter(defense %in% FBSSchools) %>% filter(special_teams_type == "KICKOFF") %>% filter(kick_result != "RECOVERED BY KICKING TEAM") %>%
+  filter(kick_result != "TOUCHBACK") %>% filter(kick_result != "FAIR CATCH") %>% mutate(StartingFPos = NewFPos - gain_loss_net) %>% summarize(KOAvgStartingFPos = mean(StartingFPos, na.rm = TRUE)) %>% mutate(KOAvgStartingFPosRank = rank(KOAvgStartingFPos, ties.method="first")) %>% rename(TeamName = DefTeamName)
+
+Punts <- pbp %>% group_by(OffTeamName) %>% filter(offense %in% FBSSchools) %>% filter(special_teams_type == "PUNT") %>% filter(is.na(penalty)) %>% summarize(NetPunt = mean(gain_loss_net, na.rm = TRUE)) %>% arrange(desc(NetPunt)) %>% mutate(NetPuntRank = rank(desc(NetPunt), ties.method="first")) %>% rename(TeamName = OffTeamName)
+
+KickOffReturnASFPos <- pbp %>% group_by(OffTeamName) %>% filter(offense %in% FBSSchools) %>% filter(special_teams_type == "KICKOFF") %>% filter(kick_result != "TOUCHBACK" & kick_result != "RECOVERED BY KICKING TEAM") %>% mutate(StartingFPos = NewFPos - gain_loss_net) %>% summarize(KORAvgStartingFPos = mean(StartingFPos, na.rm = TRUE)) %>% 
+  mutate(KORAvgStartingFPosRank = rank(desc(KORAvgStartingFPos), ties.method = "first")) %>% rename(TeamName = OffTeamName)
+
+OppNetPunts <- pbp %>% group_by(DefTeamName) %>% filter(defense %in% FBSSchools) %>% filter(special_teams_type == "PUNT") %>% filter(is.na(penalty)) %>% summarize(OppNetPunt = mean(gain_loss_net, na.rm = TRUE)) %>% arrange(OppNetPunt) %>% mutate(OppNetPuntRank = rank(OppNetPunt, ties.method="first")) %>% rename(TeamName = DefTeamName)
+
+
+SpecialTeamsDf = merge(PuntReturns, KickOffASFPos, all = TRUE) %>%
+  merge(Punts, all = TRUE) %>% merge(KickOffReturnASFPos, all = TRUE) %>% merge(OppNetPunts, all = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+
+SpecialTeamsDf <- na.omit(SpecialTeamsDf)
+
+tbl <- reactable(SpecialTeamsDf,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     filterable = FALSE,
+                                     name = "",
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   PuntReturnsRank= colDef(name = "Rk", filterable = FALSE, width = 50, class = "record1", align = "center"),
+                   KOAvgStartingFPosRank= colDef(name = "Rk", filterable = FALSE, width = 50, class = "record1", align = "center"),
+                   NetPuntRank= colDef(name = "Rk", width = 50, filterable = FALSE, class = "record1", align = "center"),
+                   KORAvgStartingFPosRank= colDef(name = "Rk", filterable = FALSE, width = 50, class = "record1", align = "center"),
+                   OppNetPuntRank= colDef(name = "Rk", filterable = FALSE, width = 50, class = "record1"),
+                   AvgPuntReturn = colDef(
+                     defaultSortOrder = "desc",
+                     align = "center",
+                     width = 75,
+                     name = "Avg PR", 
+                     format = colFormat(digits = 3), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(SpecialTeamsDf$AvgPuntReturn))/(max(SpecialTeamsDf$AvgPuntReturn) - min(SpecialTeamsDf$AvgPuntReturn))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   KOAvgStartingFPos = colDef(
+                     defaultSortOrder = "asc",
+                     width = 105,
+                     align = "center",
+                     name = "KO Avg Starting FPos", 
+                     format = colFormat(digits = 3), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(SpecialTeamsDf$KOAvgStartingFPos))/(max(SpecialTeamsDf$KOAvgStartingFPos) - min(SpecialTeamsDf$KOAvgStartingFPos))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   NetPunt = colDef(
+                     defaultSortOrder = "desc",
+                     name = "Net Punt", 
+                     align = "center",
+                     width = 75,
+                     format = colFormat(digits = 3), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(SpecialTeamsDf$NetPunt))/(max(SpecialTeamsDf$NetPunt) - min(SpecialTeamsDf$NetPunt))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   KORAvgStartingFPos = colDef(
+                     defaultSortOrder = "desc",
+                     width = 105,
+                     align = "center",
+                     name = "KOR Avg Starting FPos", 
+                     format = colFormat(digits = 3), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(SpecialTeamsDf$KORAvgStartingFPos))/(max(SpecialTeamsDf$KORAvgStartingFPos) - min(SpecialTeamsDf$KORAvgStartingFPos))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   OppNetPunt = colDef(
+                     name = "Opp Net Punt", 
+                     width = 75,
+                     align = "center",
+                     format = colFormat(digits = 2), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(SpecialTeamsDf$OppNetPunt))/(max(SpecialTeamsDf$OppNetPunt) - min(SpecialTeamsDf$OppNetPunt))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     })),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+    tbl
+)
+```
+
+##Offensive Drives
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+OffenseDrives <- OffenseDriveDataFrame %>% group_by(OffTeamName) %>% summarize(across(c("NewFPos", "Plays", "Yards", "YPP", "Efficiency", "FirstDowns", "Havoc", "RedZoneOpportunity", "DrivePoints", "BigPlays", "FirstDownEfficiency", "SecondDownEfficiency", "ThirdDownEfficiency"), ~mean(.x, na.rm = TRUE))) %>% rename(TeamName = OffTeamName) %>% mutate(StartingFPos = 100-NewFPos) %>% select(-NewFPos) %>% relocate(StartingFPos, .after = TeamName)
+
+OffenseDrives <- OffenseDrives %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+tbl <- reactable(OffenseDrives,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                      style = sticky_style, filterable = FALSE,
+                      name = "",
+                      headerStyle = sticky_style,
+                      cell = function(value) {
+                        div(
+                          class = "team",
+                          img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                        )
+                      }
+                    ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                  
+                   StartingFPos = colDef(defaultSortOrder = "desc", name = "Starting FPos", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$StartingFPos))/(max(OffenseDrives$StartingFPos) - min(OffenseDrives$StartingFPos))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   Plays = colDef(defaultSortOrder = "desc", name = "Plays / Drive", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$Plays))/(max(OffenseDrives$Plays) - min(OffenseDrives$Plays))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   Yards = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Yds / Drive", format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$Yards))/(max(OffenseDrives$Yards) - min(OffenseDrives$Yards))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   YPP = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "YPP / Drive", format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$YPP))/(max(OffenseDrives$YPP) - min(OffenseDrives$YPP))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   Efficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$Efficiency))/(max(OffenseDrives$Efficiency) - min(OffenseDrives$Efficiency))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   FirstDowns = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "First Downs", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$FirstDowns))/(max(OffenseDrives$FirstDowns) - min(OffenseDrives$FirstDowns))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   Havoc = colDef(width = 75, align = "center", name = "Havoc / Drive", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$Havoc))/(max(OffenseDrives$Havoc) - min(OffenseDrives$Havoc))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   RedZoneOpportunity = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "RZ Drive %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$RedZoneOpportunity))/(max(OffenseDrives$RedZoneOpportunity) - min(OffenseDrives$RedZoneOpportunity))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   DrivePoints = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Pts / Drive", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$DrivePoints))/(max(OffenseDrives$DrivePoints) - min(OffenseDrives$DrivePoints))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   BigPlays = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Big Plays / Drive", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$BigPlays))/(max(OffenseDrives$BigPlays) - min(OffenseDrives$BigPlays))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   FirstDownEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "1st Down Eff", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$FirstDownEfficiency))/(max(OffenseDrives$FirstDownEfficiency) - min(OffenseDrives$FirstDownEfficiency))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   SecondDownEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "2nd Down Eff", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$SecondDownEfficiency))/(max(OffenseDrives$SecondDownEfficiency) - min(OffenseDrives$SecondDownEfficiency))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdDownEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "3rd Down Eff", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(OffenseDrives$ThirdDownEfficiency))/(max(OffenseDrives$ThirdDownEfficiency) - min(OffenseDrives$ThirdDownEfficiency))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     })),
+                  
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+##Defensive Drives
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+DefenseDrives <- DefenseDriveDataFrame %>% group_by(DefTeamName) %>% summarize(across(c("NewFPos", "Plays", "Yards", "YPP", "Efficiency", "FirstDowns", "Havoc", "RedZoneOpportunity", "DrivePoints", "BigPlays", "FirstDownEfficiency", "SecondDownEfficiency", "ThirdDownEfficiency"), ~mean(.x, na.rm = TRUE))) %>% rename(TeamName = DefTeamName) %>% mutate(StartingFPos = 100-NewFPos) %>% select(-NewFPos) %>% relocate(StartingFPos, .after = TeamName)
+
+DefenseDrives <- DefenseDrives %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+tbl <- reactable(DefenseDrives,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                      style = sticky_style, filterable = FALSE,
+                      name = "",
+                      headerStyle = sticky_style,
+                      cell = function(value) {
+                        div(
+                          class = "team",
+                          img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                        )
+                      }
+                    ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                  
+                   StartingFPos = colDef(name = "Starting FPos", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$StartingFPos))/(max(DefenseDrives$StartingFPos) - min(DefenseDrives$StartingFPos))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   Plays = colDef(name = "Plays / Drive", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$Plays))/(max(DefenseDrives$Plays) - min(DefenseDrives$Plays))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   Yards = colDef(width = 75, align = "center", name = "Yds / Drive", format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$Yards))/(max(DefenseDrives$Yards) - min(DefenseDrives$Yards))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   YPP = colDef(width = 75, align = "center", name = "YPP / Drive", format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$YPP))/(max(DefenseDrives$YPP) - min(DefenseDrives$YPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   Efficiency = colDef(width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$Efficiency))/(max(DefenseDrives$Efficiency) - min(DefenseDrives$Efficiency))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   FirstDowns = colDef(width = 75, align = "center", name = "First Downs", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$FirstDowns))/(max(DefenseDrives$FirstDowns) - min(DefenseDrives$FirstDowns))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   Havoc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Havoc / Drive", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$Havoc))/(max(DefenseDrives$Havoc) - min(DefenseDrives$Havoc))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   RedZoneOpportunity = colDef(width = 75, align = "center", name = "RZ Drive %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$RedZoneOpportunity))/(max(DefenseDrives$RedZoneOpportunity) - min(DefenseDrives$RedZoneOpportunity))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   DrivePoints = colDef(width = 75, align = "center", name = "Pts / Drive", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$DrivePoints))/(max(DefenseDrives$DrivePoints) - min(DefenseDrives$DrivePoints))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   BigPlays = colDef(width = 75, align = "center", name = "Big Plays / Drive", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$BigPlays))/(max(DefenseDrives$BigPlays) - min(DefenseDrives$BigPlays))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   FirstDownEfficiency = colDef(width = 75, align = "center", name = "1st Down Eff", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$FirstDownEfficiency))/(max(DefenseDrives$FirstDownEfficiency) - min(DefenseDrives$FirstDownEfficiency))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   SecondDownEfficiency = colDef(width = 75, align = "center", name = "2nd Down Eff", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$SecondDownEfficiency))/(max(DefenseDrives$SecondDownEfficiency) - min(DefenseDrives$SecondDownEfficiency))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdDownEfficiency = colDef(width = 75, align = "center", name = "3rd Down Eff", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(DefenseDrives$ThirdDownEfficiency))/(max(DefenseDrives$ThirdDownEfficiency) - min(DefenseDrives$ThirdDownEfficiency))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     })),
+                  
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+##RedZone
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+RedZoneOff <- FBSOff %>% group_by(OffTeamName) %>% filter(FieldZone == "RZ") %>% summarize(RedZoneOffPlays = n(), RedZoneOffEfficiency = sum(Efficient, na.rm = TRUE), RedZoneOffEfficiencyPerc = mean(Efficient, na.rm = TRUE), RedZoneOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = OffTeamName)
+RedZoneDef <- FBSDef %>% group_by(DefTeamName) %>% filter(FieldZone == "RZ") %>% summarize(RedZoneDefPlays = n(), RedZoneDefEfficiency = sum(Efficient, na.rm = TRUE), RedZoneDefEfficiencyPerc = mean(Efficient, na.rm = TRUE), RedZoneDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = DefTeamName)
+
+RedZoneOffDrives <- OffenseDriveDataFrame %>% group_by(OffTeamName) %>% filter(RedZoneOpportunity == 1) %>% summarize(OffRZTotalDrives = n(), OffPtsPerDrive = mean(DrivePoints, na.rm = TRUE), OffTD = sum(drive_end_event == "TOUCHDOWN", na.rm = TRUE), OffNoTD = sum(drive_end_event != "TOUCHDOWN", na.rm = TRUE), RZOffTDPerc = OffTD / OffRZTotalDrives) %>% select(-OffTD, -OffNoTD) %>% rename(TeamName = OffTeamName)
+RedZoneDefDrives <- DefenseDriveDataFrame %>% group_by(DefTeamName) %>% filter(RedZoneOpportunity == 1) %>% summarize(DefRZTotalDrives = n(), DefPtsPerDrive = mean(DrivePoints, na.rm = TRUE), DefTD = sum(drive_end_event == "TOUCHDOWN", na.rm = TRUE), DefNoTD = sum(drive_end_event != "TOUCHDOWN", na.rm = TRUE), RZDefTDPerc = DefTD / DefRZTotalDrives) %>% select(-DefTD, -DefNoTD) %>% rename(TeamName = DefTeamName)
+
+RedZoneCombined <- merge(RedZoneOff, RedZoneOffDrives, all = TRUE) %>% merge(RedZoneDef, all = TRUE) %>% merge(RedZoneDefDrives, all = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+
+RedZoneCombined = na.omit(RedZoneCombined)
+
+tbl <- reactable(RedZoneCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     name = "", filterable = FALSE,
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   
+                   RedZoneOffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Plays"),
+                   
+                   OffPtsPerDrive = colDef(width = 75, align = "center", name = " Off Pts / Drive", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(RedZoneCombined$OffPtsPerDrive))/(max(RedZoneCombined$OffPtsPerDrive) - min(RedZoneCombined$OffPtsPerDrive))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   OffRZTotalDrives = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Drives"),
+                   
+                   RZOffTDPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off TD %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(RedZoneCombined$RZOffTDPerc))/(max(RedZoneCombined$RZOffTDPerc) - min(RedZoneCombined$RZOffTDPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   RedZoneOffEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Eff Plays"),
+                   
+                   RedZoneOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(RedZoneCombined$RedZoneOffYPP))/(max(RedZoneCombined$RedZoneOffYPP) - min(RedZoneCombined$RedZoneOffYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   RedZoneOffEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(RedZoneCombined$RedZoneOffEfficiencyPerc))/(max(RedZoneCombined$RedZoneOffEfficiencyPerc) - min(RedZoneCombined$RedZoneOffEfficiencyPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   RedZoneDefPlays = colDef(defaultSortOrder = "desc", align = "center", width = 75, name = "Def Plays"),
+                   RedZoneDefEfficiency = colDef(align = "center", width = 75, name = "Def Eff Plays"),
+                   
+                   RedZoneDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(RedZoneCombined$RedZoneDefYPP))/(max(RedZoneCombined$RedZoneDefYPP) - min(RedZoneCombined$RedZoneDefYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   RedZoneDefEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(RedZoneCombined$RedZoneDefEfficiencyPerc))/(max(RedZoneCombined$RedZoneDefEfficiencyPerc) - min(RedZoneCombined$RedZoneDefEfficiencyPerc))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             }),
+                   DefPtsPerDrive = colDef(width = 75, align = "center", name = " Off Pts / Drive", format = colFormat(digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(RedZoneCombined$DefPtsPerDrive))/(max(RedZoneCombined$DefPtsPerDrive) - min(RedZoneCombined$DefPtsPerDrive))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   DefRZTotalDrives = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Def Drives"),
+                   
+                   RZDefTDPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Def TD %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(RedZoneCombined$RZDefTDPerc))/(max(RedZoneCombined$RZDefTDPerc) - min(RedZoneCombined$RZDefTDPerc))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("RedZoneOffPlays", "RedZoneOffEfficiency", "RedZoneOffEfficiencyPerc", "RedZoneOffYPP", "OffRZTotalDrives", "OffPtsPerDrive", "RZOffTDPerc")),
+                   colGroup(name = "Defense", columns = c("RedZoneDefPlays", "RedZoneDefEfficiency", "RedZoneDefEfficiencyPerc", "RedZoneDefYPP", "DefRZTotalDrives", "DefPtsPerDrive", "RZDefTDPerc"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+## 3rd Down Offense
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+ThirdShort <- FBSOff %>% group_by(OffTeamName) %>% filter(down == 3 & distance <= 2) %>% summarize(ThirdShortPlays = n(), ThirdShortEfficient = sum(Efficient == 1, na.rm = TRUE), ThirdShortYPP = mean(Gain.Loss, na.rm = TRUE)) %>%
+  mutate(ThirdShortPerc = ThirdShortEfficient/ThirdShortPlays, ThirdShortRank = rank(desc(ThirdShortPerc), ties.method="first")) %>% rename(TeamName = OffTeamName) %>% select(-ThirdShortEfficient)
+ThirdMed <- FBSOff %>% group_by(OffTeamName) %>% filter(down == 3) %>% filter(distance < 7 & distance > 2) %>% summarize(ThirdMedPlays = n(), ThirdMedEfficient = sum(Efficient == 1, na.rm = TRUE), ThirdMedYPP = mean(Gain.Loss, na.rm = TRUE)) %>%
+  mutate(ThirdMedPerc = ThirdMedEfficient/ThirdMedPlays, ThirdMedRank = rank(desc(ThirdMedPerc), ties.method="first")) %>% rename(TeamName = OffTeamName) %>% select(-ThirdMedEfficient)
+ThirdLong <- FBSOff %>% group_by(OffTeamName) %>% filter(down == 3 & distance >=7) %>% summarize(ThirdLongPlays = n(), ThirdLongEfficient = sum(Efficient == 1, na.rm = TRUE), ThirdLongYPP = mean(Gain.Loss, na.rm = TRUE)) %>%
+  mutate(ThirdLongPerc = ThirdLongEfficient/ThirdLongPlays, ThirdLongRank = rank(desc(ThirdLongPerc), ties.method="first")) %>% rename(TeamName = OffTeamName) %>% select(-ThirdLongEfficient)
+OverallThirdDown <- FBSOff %>% group_by(OffTeamName) %>% filter(down == 3) %>% summarize(ThirdDownPlays = n(), ThirdDownEfficient = sum(Efficient == 1, na.rm = TRUE), ThirdDownYPP = mean(Gain.Loss, na.rm = TRUE), AvgDist = mean(distance, na.rm = TRUE)) %>%
+  mutate(ThirdDownPerc = ThirdDownEfficient/ThirdDownPlays, ThirdDownRank = rank(desc(ThirdDownPerc), ties.method="first")) %>% rename(TeamName = OffTeamName) %>% select(-ThirdDownEfficient)
+
+ThirdDownCombined <- merge(ThirdShort, ThirdMed, all.x = TRUE) %>% merge(ThirdLong, all.x = TRUE) %>% merge(OverallThirdDown, all.x = TRUE) %>%
+  merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+ThirdDownCombined = na.omit(ThirdDownCombined)
+
+tbl <- reactable(ThirdDownCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                      style = sticky_style, filterable = FALSE,
+                      name = "",
+                      headerStyle = sticky_style,
+                      cell = function(value) {
+                        div(
+                          class = "team",
+                          img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                        )
+                      }
+                    ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   ThirdShortRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   ThirdMedRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   ThirdLongRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   ThirdDownRank= colDef(name = "Rk", filterable = FALSE, width = 60, class = "record1", align = "center"),
+                   
+                   ThirdShortPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Short Plays"),
+                   
+                   ThirdShortYPP = colDef(defaultSortOrder = "desc", name = "Short YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdShortYPP))/(max(ThirdDownCombined$ThirdShortYPP) - min(ThirdDownCombined$ThirdShortYPP))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdShortPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Short %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdShortPerc))/(max(ThirdDownCombined$ThirdShortPerc) - min(ThirdDownCombined$ThirdShortPerc))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                  
+                   ThirdMedPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Med Plays"),
+                   
+                   ThirdMedYPP = colDef(defaultSortOrder = "desc", name = "Med YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdMedYPP))/(max(ThirdDownCombined$ThirdMedYPP) - min(ThirdDownCombined$ThirdMedYPP))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdMedPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Med %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdMedPerc))/(max(ThirdDownCombined$ThirdMedPerc) - min(ThirdDownCombined$ThirdMedPerc))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdLongPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Long Plays"),
+                   
+                   ThirdLongYPP = colDef(defaultSortOrder = "desc", name = "Long YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdLongYPP))/(max(ThirdDownCombined$ThirdLongYPP) - min(ThirdDownCombined$ThirdLongYPP))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdLongPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Long %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdLongPerc))/(max(ThirdDownCombined$ThirdLongPerc) - min(ThirdDownCombined$ThirdLongPerc))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdDownPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Total Plays"),
+                   
+                   ThirdDownYPP = colDef(defaultSortOrder = "desc", name = "Total YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdDownYPP))/(max(ThirdDownCombined$ThirdDownYPP) - min(ThirdDownCombined$ThirdDownYPP))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   AvgDist= colDef(name = "Avg Distance", filterable = FALSE, format = colFormat(digits = 1), width = 75, align = "center"),
+                   
+                   ThirdDownPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Total %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdDownPerc))/(max(ThirdDownCombined$ThirdDownPerc) - min(ThirdDownCombined$ThirdDownPerc))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     })
+                  ),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+##3rd Down Defense
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+ThirdShort <- FBSDef %>% group_by(DefTeamName) %>% filter(down == 3 & distance <= 2) %>% summarize(ThirdShortPlays = n(), ThirdShortEfficient = sum(Efficient == 1, na.rm = TRUE), ThirdShortYPP = mean(Gain.Loss, na.rm = TRUE)) %>%
+  mutate(ThirdShortPerc = ThirdShortEfficient/ThirdShortPlays, ThirdShortRank = rank(ThirdShortPerc, ties.method="first")) %>% rename(TeamName = DefTeamName) %>% select(-ThirdShortEfficient)
+ThirdMed <- FBSDef %>% group_by(DefTeamName) %>% filter(down == 3) %>% filter(distance < 7 & distance > 2) %>% summarize(ThirdMedPlays = n(), ThirdMedEfficient = sum(Efficient == 1, na.rm = TRUE), ThirdMedYPP = mean(Gain.Loss, na.rm = TRUE)) %>%
+  mutate(ThirdMedPerc = ThirdMedEfficient/ThirdMedPlays, ThirdMedRank = rank(ThirdMedPerc, ties.method="first")) %>% rename(TeamName = DefTeamName) %>% select(-ThirdMedEfficient)
+ThirdLong <- FBSDef %>% group_by(DefTeamName) %>% filter(down == 3 & distance >=7) %>% summarize(ThirdLongPlays = n(), ThirdLongEfficient = sum(Efficient == 1, na.rm = TRUE), ThirdLongYPP = mean(Gain.Loss, na.rm = TRUE)) %>%
+  mutate(ThirdLongPerc = ThirdLongEfficient/ThirdLongPlays, ThirdLongRank = rank(ThirdLongPerc, ties.method="first")) %>% rename(TeamName = DefTeamName) %>% select(-ThirdLongEfficient)
+OverallThirdDown <- FBSDef %>% group_by(DefTeamName) %>% filter(down == 3) %>% summarize(ThirdDownPlays = n(), ThirdDownEfficient = sum(Efficient == 1, na.rm = TRUE), ThirdDownYPP = mean(Gain.Loss, na.rm = TRUE), AvgDist = mean(distance, na.rm = TRUE)) %>%
+  mutate(ThirdDownPerc = ThirdDownEfficient/ThirdDownPlays, ThirdDownRank = rank(ThirdDownPerc, ties.method="first")) %>% rename(TeamName = DefTeamName) %>% select(-ThirdDownEfficient)
+
+ThirdDownCombined <- merge(ThirdShort, ThirdMed, all.x = TRUE) %>% merge(ThirdLong, all.x = TRUE) %>% merge(OverallThirdDown, all.x = TRUE) %>%
+  merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+ThirdDownCombined <- na.omit(ThirdDownCombined)
+
+tbl <- reactable(ThirdDownCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                      style = sticky_style, filterable = FALSE,
+                      name = "",
+                      headerStyle = sticky_style,
+                      cell = function(value) {
+                        div(
+                          class = "team",
+                          img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                        )
+                      }
+                    ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   ThirdShortRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   ThirdMedRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   ThirdLongRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   ThirdDownRank= colDef(name = "Rk", filterable = FALSE, width = 60, class = "record1", align = "center"),
+                   
+                   ThirdShortPlays = colDef(align = "center",width = 75,name = "Short Plays"),
+                   
+                   ThirdShortYPP = colDef(name = "Short YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdShortYPP))/(max(ThirdDownCombined$ThirdShortYPP) - min(ThirdDownCombined$ThirdShortYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdShortPerc = colDef(width = 75, align = "center", name = "Short %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdShortPerc))/(max(ThirdDownCombined$ThirdShortPerc) - min(ThirdDownCombined$ThirdShortPerc))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                  
+                   ThirdMedPlays = colDef(align = "center",width = 75,name = "Med Plays"),
+                   
+                   ThirdMedYPP = colDef(name = "Med YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdMedYPP))/(max(ThirdDownCombined$ThirdMedYPP) - min(ThirdDownCombined$ThirdMedYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdMedPerc = colDef(width = 75, align = "center", name = "Med %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdMedPerc))/(max(ThirdDownCombined$ThirdMedPerc) - min(ThirdDownCombined$ThirdMedPerc))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdLongPlays = colDef(align = "center",width = 75,name = "Long Plays"),
+                   
+                   ThirdLongYPP = colDef(name = "Long YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdLongYPP))/(max(ThirdDownCombined$ThirdLongYPP) - min(ThirdDownCombined$ThirdLongYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdLongPerc = colDef(width = 75, align = "center", name = "Long %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdLongPerc))/(max(ThirdDownCombined$ThirdLongPerc) - min(ThirdDownCombined$ThirdLongPerc))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   ThirdDownPlays = colDef(align = "center",width = 75,name = "Total Plays"),
+                   
+                   ThirdDownYPP = colDef(name = "Total YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdDownYPP))/(max(ThirdDownCombined$ThirdDownYPP) - min(ThirdDownCombined$ThirdDownYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   AvgDist= colDef(defaultSortOrder = "desc", name = "Avg Distance", filterable = FALSE, format = colFormat(digits = 1), width = 75, align = "center"),
+                   
+                   ThirdDownPerc = colDef(width = 75, align = "center", name = "Total %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(ThirdDownCombined$ThirdDownPerc))/(max(ThirdDownCombined$ThirdDownPerc) - min(ThirdDownCombined$ThirdDownPerc))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     })
+                  ),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+```
+
+## 2 Minute Off/Def
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+TwoMinuteEffOff = FBSOff %>% group_by(OffTeamName) %>% filter(two_minute == 2) %>% 
+  summarize(TwoMinuteOffPlays = n(), TwoMinuteOffEffPlays = sum(Efficient == 1, na.rm = TRUE), TwoMinuteOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% mutate(TwoMinuteOffOffensiveEfficiency = TwoMinuteOffEffPlays/TwoMinuteOffPlays, TwoMinuteOffRank = rank(desc(TwoMinuteOffOffensiveEfficiency), ties.method="first")) %>%
+  rename(TeamName = OffTeamName)
+TwoMinuteDriveOff = OffenseDriveDataFrame %>% group_by(OffTeamName) %>% filter(two_minute == 2) %>% 
+  summarize(TwoMinuteOffDrives = n(), OffScoringDrive = sum(ScoringDrive == 1, na.rm = TRUE), TwoMinuteOffYPDrive = mean(Yards, na.rm = TRUE)) %>% mutate(TwoMinuteDriveOffensiveScoringEfficiency = OffScoringDrive/TwoMinuteOffDrives, TwoMinuteOffDriveRank = rank(desc(TwoMinuteDriveOffensiveScoringEfficiency), ties.method="first")) %>%
+  rename(TeamName = OffTeamName)
+TwoMinuteEffDef = FBSDef %>% filter(two_minute == 2) %>% group_by(DefTeamName) %>% 
+  summarize(TwoMinuteDefPlays = n(), TwoMinuteDefEffPlays = sum(Efficient == 1, na.rm = TRUE), TwoMinuteDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% mutate(TwoMinuteDefOffensiveEfficiency = TwoMinuteDefEffPlays/TwoMinuteDefPlays, TwoMinuteDefRank = rank(TwoMinuteDefOffensiveEfficiency, ties.method="first")) %>%
+  rename(TeamName = DefTeamName)
+TwoMinuteDriveDef = DefenseDriveDataFrame %>% group_by(DefTeamName) %>% filter(two_minute == 2) %>% 
+  summarize(TwoMinuteDefDrives = n(), DefScoringDrive = sum(ScoringDrive == 1, na.rm = TRUE), TwoMinuteDefYPDrive = mean(Yards, na.rm = TRUE)) %>% mutate(TwoMinuteDriveDefensiveScoringEfficiency = DefScoringDrive/TwoMinuteDefDrives, TwoMinuteDefDriveRank = rank(TwoMinuteDriveDefensiveScoringEfficiency, ties.method="first")) %>%
+  rename(TeamName = DefTeamName)
+
+TwoMinuteCombined <- merge(TwoMinuteEffOff, TwoMinuteDriveOff, all.x = TRUE) %>% merge(TwoMinuteEffDef, all.x = TRUE) %>% merge(TwoMinuteDriveDef, all.x = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+TwoMinuteCombined <- na.omit(TwoMinuteCombined)
+
+tbl <- reactable(TwoMinuteCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                      style = sticky_style, filterable = FALSE,
+                      name = "",
+                      headerStyle = sticky_style,
+                      cell = function(value) {
+                        div(
+                          class = "team",
+                          img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                        )
+                      }
+                    ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   TwoMinuteOffDriveRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   TwoMinuteOffRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   TwoMinuteDefRank= colDef(name = "Rk", width = 60, filterable = FALSE, class = "record1", align = "center"),
+                   TwoMinuteDefDriveRank= colDef(name = "Rk", filterable = FALSE, width = 60, class = "record1", align = "center"),
+                   
+                   TwoMinuteOffDrives = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Drive #"),
+                   
+                   OffScoringDrive = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Score Drive #"),
+                   
+                   TwoMinuteOffYPDrive = colDef(defaultSortOrder = "desc", name = "Off Yds / Drive", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(TwoMinuteCombined$TwoMinuteOffYPDrive))/(max(TwoMinuteCombined$TwoMinuteOffYPDrive) - min(TwoMinuteCombined$TwoMinuteOffYPDrive))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   TwoMinuteDriveOffensiveScoringEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Drive Score %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(TwoMinuteCombined$TwoMinuteDriveOffensiveScoringEfficiency))/(max(TwoMinuteCombined$TwoMinuteDriveOffensiveScoringEfficiency) - min(TwoMinuteCombined$TwoMinuteDriveOffensiveScoringEfficiency))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   TwoMinuteOffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Play #"),
+                   
+                   TwoMinuteOffEffPlays = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Play Eff #"),
+                   
+                   TwoMinuteOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(TwoMinuteCombined$TwoMinuteOffYPP))/(max(TwoMinuteCombined$TwoMinuteOffYPP) - min(TwoMinuteCombined$TwoMinuteOffYPP))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   TwoMinuteOffOffensiveEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(TwoMinuteCombined$TwoMinuteOffOffensiveEfficiency))/(max(TwoMinuteCombined$TwoMinuteOffOffensiveEfficiency) - min(TwoMinuteCombined$TwoMinuteOffOffensiveEfficiency))
+                       color <- col_pal_good(normalized)
+                       list(background = color)
+                     }),
+                   
+                   TwoMinuteDefDrives = colDef(align = "center",width = 75,name = "Def Drive #"),
+                   
+                   DefScoringDrive = colDef(width = 75, align = "center", name = "Def Score Drive #"),
+                   
+                   TwoMinuteDefYPDrive = colDef(name = "Def Yds / Drive", align = "center", width = 75, format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(TwoMinuteCombined$TwoMinuteDefYPDrive))/(max(TwoMinuteCombined$TwoMinuteDefYPDrive) - min(TwoMinuteCombined$TwoMinuteDefYPDrive))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   TwoMinuteDriveDefensiveScoringEfficiency = colDef(width = 75, align = "center", name = "Def Drive Score %",  format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(TwoMinuteCombined$TwoMinuteDriveDefensiveScoringEfficiency))/(max(TwoMinuteCombined$TwoMinuteDriveDefensiveScoringEfficiency) - min(TwoMinuteCombined$TwoMinuteDriveDefensiveScoringEfficiency))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   TwoMinuteDefPlays = colDef(align = "center",width = 75,name = "Def Play #"),
+                   
+                   TwoMinuteDefEffPlays = colDef(width = 75, align = "center", name = "Def Play Eff #"),
+                   
+                   TwoMinuteDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(TwoMinuteCombined$TwoMinuteDefYPP))/(max(TwoMinuteCombined$TwoMinuteDefYPP) - min(TwoMinuteCombined$TwoMinuteDefYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     }),
+                   
+                   TwoMinuteDefOffensiveEfficiency = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                     },
+                     style = function(value){
+                       normalized <- (value - min(TwoMinuteCombined$TwoMinuteDefOffensiveEfficiency))/(max(TwoMinuteCombined$TwoMinuteDefOffensiveEfficiency) - min(TwoMinuteCombined$TwoMinuteDefOffensiveEfficiency))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)
+                     })
+                  ),
+                 columnGroups = list(
+            colGroup(name = "Offense", columns = c("TwoMinuteOffPlays", "TwoMinuteOffEffPlays", "TwoMinuteOffYPP", "TwoMinuteOffOffensiveEfficiency", "TwoMinuteOffDrives", "OffScoringDrive", "TwoMinuteOffRank", "TwoMinuteOffYPDrive", "TwoMinuteDriveOffensiveScoringEfficiency", "TwoMinuteOffDriveRank")),
+            colGroup(name = "Defense", columns = c("TwoMinuteDefPlays", "TwoMinuteDefEffPlays", "TwoMinuteDefYPP", "TwoMinuteDefOffensiveEfficiency","TwoMinuteDefRank", "TwoMinuteDefDrives", "DefScoringDrive", "TwoMinuteDefYPDrive", "TwoMinuteDriveDefensiveScoringEfficiency", "TwoMinuteDefDriveRank"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+## 4 Minute Off/Def
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+FourMinuteEffOff = FBSOff %>% filter(two_minute == 4) %>% group_by(OffTeamName) %>% 
+  summarize(FourMinuteOffPlays = n(), FourMinuteOffEffPlays = sum(Efficient == 1, na.rm = TRUE), FourMinuteOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% mutate(FourMinuteOffOffensiveEfficiency = FourMinuteOffEffPlays/FourMinuteOffPlays, FourMinuteOffRank = rank(desc(FourMinuteOffOffensiveEfficiency), ties.method="first")) %>% rename(TeamName = OffTeamName)
+FourMinuteEffDef = FBSDef %>% filter(two_minute == 4) %>% group_by(DefTeamName) %>% 
+  summarize(FourMinuteDefPlays = n(), FourMinuteDefEffPlays = sum(Efficient == 1, na.rm = TRUE), FourMinuteDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% mutate(FourMinuteDefOffensiveEfficiency = FourMinuteDefEffPlays/FourMinuteDefPlays, FourMinuteDefRank = rank(FourMinuteDefOffensiveEfficiency, ties.method="first")) %>% rename(TeamName = DefTeamName)
+
+FourMinuteCombined <- merge(dat1, FourMinuteEffOff, all.x = TRUE) %>% select(-PrimaryColor, -SecondaryColor, -TeamCode) %>% merge(FourMinuteEffDef, all.x = TRUE) %>% relocate(Conf, .after = FourMinuteDefRank) 
+
+FourMinuteCombined <- na.omit(FourMinuteCombined)
+
+tbl <- reactable(FourMinuteCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style, filterable = FALSE,
+                                     name = "",
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   FourMinuteOffRank= colDef(name = "Rk", filterable = FALSE, width = 50, class = "record1", align = "center"),
+                   FourMinuteDefRank= colDef(name = "Rk", filterable = FALSE, width = 50, class = "record1", align = "center"),
+                   
+                   FourMinuteOffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Play #"),
+                   
+                   FourMinuteOffEffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Eff Plays"),
+                   
+                   FourMinuteOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(FourMinuteCombined$FourMinuteOffYPP))/(max(FourMinuteCombined$FourMinuteOffYPP) - min(FourMinuteCombined$FourMinuteOffYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   FourMinuteOffOffensiveEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(FourMinuteCombined$FourMinuteOffOffensiveEfficiency))/(max(FourMinuteCombined$FourMinuteOffOffensiveEfficiency) - min(FourMinuteCombined$FourMinuteOffOffensiveEfficiency))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   FourMinuteDefPlays = colDef(align = "center",width = 75,name = "Def Play #"),
+                   
+                   FourMinuteDefEffPlays = colDef(align = "center",width = 75,name = "Def Eff Plays"),
+                   
+                   FourMinuteDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(FourMinuteCombined$FourMinuteDefYPP))/(max(FourMinuteCombined$FourMinuteDefYPP) - min(FourMinuteCombined$FourMinuteDefYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   FourMinuteDefOffensiveEfficiency = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(FourMinuteCombined$FourMinuteDefOffensiveEfficiency))/(max(FourMinuteCombined$FourMinuteDefOffensiveEfficiency) - min(FourMinuteCombined$FourMinuteDefOffensiveEfficiency))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("FourMinuteOffPlays", "FourMinuteOffEffPlays", "FourMinuteOffYPP", "FourMinuteOffOffensiveEfficiency","FourMinuteOffRank")),
+                   colGroup(name = "Defense", columns = c("FourMinuteDefPlays", "FourMinuteDefEffPlays", "FourMinuteDefYPP", "FourMinuteDefOffensiveEfficiency","FourMinuteDefRank"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+##Number of Pass Blockers
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+PassBlockersOff <- FBSOff %>% filter(run_pass == "P") %>% group_by(OffTeamName, pass_blocking_number) %>% summarize(OffPassBlockPlays = n(), OffPassBlockEfficiency = sum(Efficient, na.rm = TRUE), OffPassBlockEfficiencyPerc = mean(Efficient, na.rm = TRUE), OffPassBlockYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = OffTeamName)
+PassBlockersDef <- FBSDef %>% filter(run_pass == "P") %>% group_by(DefTeamName, pass_blocking_number) %>% summarize(DefPassBlockPlays = n(), DefPassBlockEfficiency = sum(Efficient, na.rm = TRUE), DefPassBlockEfficiencyPerc = mean(Efficient, na.rm = TRUE), DefPassBlockYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = DefTeamName)
+
+PassBlockersCombined <- merge(PassBlockersOff, PassBlockersDef, all = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+PassBlockersCombined = na.omit(PassBlockersCombined)
+
+tbl <- reactable(PassBlockersCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     name = "", filterable = FALSE,
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   
+                   pass_blocking_number = colDef(defaultSortOrder = "desc", filterable = TRUE, align = "center",width = 75, name = "Pass Blocking #"),
+                   
+                   OffPassBlockPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Plays"),
+                   OffPassBlockEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Eff Plays"),
+                   
+                   OffPassBlockYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(PassBlockersCombined$OffPassBlockYPP))/(max(PassBlockersCombined$OffPassBlockYPP) - min(PassBlockersCombined$OffPassBlockYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   OffPassBlockEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(PassBlockersCombined$OffPassBlockEfficiencyPerc))/(max(PassBlockersCombined$OffPassBlockEfficiencyPerc) - min(PassBlockersCombined$OffPassBlockEfficiencyPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   DefPassBlockPlays = colDef(defaultSortOrder = "desc", align = "center", width = 75, name = "Def Plays"),
+                   DefPassBlockEfficiency = colDef(align = "center", width = 75, name = "Def Eff Plays"),
+                   
+                   DefPassBlockYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(PassBlockersCombined$DefPassBlockYPP))/(max(PassBlockersCombined$DefPassBlockYPP) - min(PassBlockersCombined$DefPassBlockYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   DefPassBlockEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(PassBlockersCombined$DefPassBlockEfficiencyPerc))/(max(PassBlockersCombined$DefPassBlockEfficiencyPerc) - min(PassBlockersCombined$DefPassBlockEfficiencyPerc))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("OffPassBlockPlays", "OffPassBlockEfficiency", "OffPassBlockEfficiencyPerc", "OffPassBlockYPP")),
+                   colGroup(name = "Defense", columns = c("DefPassBlockPlays", "DefPassBlockEfficiency", "DefPassBlockEfficiencyPerc", "DefPassBlockYPP"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##Dropback Depth
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+DropBackDepthOff <- FBSOff %>% filter(run_pass == "P") %>% group_by(OffTeamName, dropback_depth) %>% summarize(OffDropBackPlays = n(), OffDropBackEfficiency = sum(Efficient, na.rm = TRUE), OffDropBackEfficiencyPerc = mean(Efficient, na.rm = TRUE), OffDropBackYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = OffTeamName)
+DropBackDepthDef <- FBSDef %>% filter(run_pass == "P") %>% group_by(DefTeamName, dropback_depth) %>% summarize(DefDropBackPlays = n(), DefDropBackEfficiency = sum(Efficient, na.rm = TRUE), DefDropBackEfficiencyPerc = mean(Efficient, na.rm = TRUE), DefDropBackYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = DefTeamName)
+
+DropBackDepthCombined <- merge(DropBackDepthOff, DropBackDepthDef, all = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+DropBackDepthCombined = na.omit(DropBackDepthCombined)
+
+tbl <- reactable(DropBackDepthCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     name = "", filterable = FALSE,
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   
+                   dropback_depth = colDef(defaultSortOrder = "desc", filterable = TRUE, align = "center",width = 75, name = "DB Depth"),
+                   
+                   OffDropBackPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Plays"),
+                   OffDropBackEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Eff Plays"),
+                   
+                   OffDropBackYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(DropBackDepthCombined$OffDropBackYPP))/(max(DropBackDepthCombined$OffDropBackYPP) - min(DropBackDepthCombined$OffDropBackYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   OffDropBackEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(DropBackDepthCombined$OffDropBackEfficiencyPerc))/(max(DropBackDepthCombined$OffDropBackEfficiencyPerc) - min(DropBackDepthCombined$OffDropBackEfficiencyPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   DefDropBackPlays = colDef(defaultSortOrder = "desc", align = "center", width = 75, name = "Def Plays"),
+                   DefDropBackEfficiency = colDef(align = "center", width = 75, name = "Def Eff Plays"),
+                   
+                   DefDropBackYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(DropBackDepthCombined$DefDropBackYPP))/(max(DropBackDepthCombined$DefDropBackYPP) - min(DropBackDepthCombined$DefDropBackYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   DefDropBackEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(DropBackDepthCombined$DefDropBackEfficiencyPerc))/(max(DropBackDepthCombined$DefDropBackEfficiencyPerc) - min(DropBackDepthCombined$DefDropBackEfficiencyPerc))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("OffDropBackPlays", "OffDropBackEfficiency", "OffDropBackEfficiencyPerc", "OffDropBackYPP")),
+                   colGroup(name = "Defense", columns = c("DefDropBackPlays", "DefDropBackEfficiency", "DefDropBackEfficiencyPerc", "DefDropBackYPP"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+## Blitz Plays
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+BlitzPlaysOff = FBSOff %>% filter(blitz_dog == 1) %>% group_by(OffTeamName) %>% 
+  summarize(BlitzPlaysOff = n(), BlitzPlaysOffEffPlays = sum(Efficient == 1, na.rm = TRUE), BlitzPlaysOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% mutate(BlitzPlaysOffOffensiveEfficiency = BlitzPlaysOffEffPlays/BlitzPlaysOff, BlitzOffRank = rank(desc(BlitzPlaysOffOffensiveEfficiency), ties.method="first")) %>% rename(TeamName = OffTeamName)
+BlitzPlaysOff <- merge(BlitzPlaysOff, TotalPlaysOff) %>% mutate(OffBlitzPerc = BlitzPlaysOff / TotalPlaysOff)
+BlitzPlaysDef = FBSDef %>% filter(blitz_dog == 1) %>% group_by(DefTeamName) %>% 
+  summarize(BlitzPlaysDef = n(), BlitzPlaysDefEffPlays = sum(Efficient == 1, na.rm = TRUE), BlitzPlaysDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% mutate(BlitzPlaysDefOffensiveEfficiency = BlitzPlaysDefEffPlays/BlitzPlaysDef, BlitzDefRank = rank(BlitzPlaysDefOffensiveEfficiency, ties.method="first")) %>% rename(TeamName = DefTeamName)
+BlitzPlaysDef <- merge(BlitzPlaysDef, TotalPlaysDef) %>% mutate(DefBlitzPerc = BlitzPlaysDef / TotalPlaysDef)
+
+BlitzPlaysCombined <- merge(BlitzPlaysOff, BlitzPlaysDef, all.x = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName) 
+
+BlitzPlaysCombined <- na.omit(BlitzPlaysCombined)
+
+tbl <- reactable(BlitzPlaysCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     name = "", filterable = FALSE,
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   BlitzOffRank= colDef(name = "Rk", width = 50, class = "record1", align = "center"),
+                   BlitzDefRank= colDef(name = "Rk", width = 50, class = "record1", align = "center"),
+                   
+                   BlitzPlaysOff = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Play #"),
+                   
+                   BlitzPlaysOffEffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Eff Plays"),
+                   
+                   BlitzPlaysOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(BlitzPlaysCombined$BlitzPlaysOffYPP))/(max(BlitzPlaysCombined$BlitzPlaysOffYPP) - min(BlitzPlaysCombined$BlitzPlaysOffYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   BlitzPlaysOffOffensiveEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(BlitzPlaysCombined$BlitzPlaysOffOffensiveEfficiency))/(max(BlitzPlaysCombined$BlitzPlaysOffOffensiveEfficiency) - min(BlitzPlaysCombined$BlitzPlaysOffOffensiveEfficiency))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   TotalPlaysOff = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Total Off Plays"),
+                   
+                   OffBlitzPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Blitz %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(BlitzPlaysCombined$OffBlitzPerc))/(max(BlitzPlaysCombined$OffBlitzPerc) - min(BlitzPlaysCombined$OffBlitzPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   BlitzPlaysDef = colDef(align = "center",width = 75,name = "Def Play #"),
+                   
+                   BlitzPlaysDefEffPlays = colDef(align = "center",width = 75,name = "Def Eff Plays"),
+                   
+                   BlitzPlaysDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(BlitzPlaysCombined$BlitzPlaysDefYPP))/(max(BlitzPlaysCombined$BlitzPlaysDefYPP) - min(BlitzPlaysCombined$BlitzPlaysDefYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   BlitzPlaysDefOffensiveEfficiency = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(BlitzPlaysCombined$BlitzPlaysDefOffensiveEfficiency))/(max(BlitzPlaysCombined$BlitzPlaysDefOffensiveEfficiency) - min(BlitzPlaysCombined$BlitzPlaysDefOffensiveEfficiency))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             }),
+                                  TotalPlaysDef = colDef(align = "center",width = 75,name = "Total Def Plays"),
+                   
+                   DefBlitzPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Def Blitz %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(BlitzPlaysCombined$DefBlitzPerc))/(max(BlitzPlaysCombined$DefBlitzPerc) - min(BlitzPlaysCombined$DefBlitzPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("BlitzPlaysOff", "BlitzPlaysOffEffPlays", "BlitzPlaysOffYPP", "BlitzPlaysOffOffensiveEfficiency","BlitzOffRank", "TotalPlaysOff", "OffBlitzPerc")),
+                   colGroup(name = "Defense", columns = c("BlitzPlaysDef", "BlitzPlaysDefEffPlays", "BlitzPlaysDefYPP", "BlitzPlaysDefOffensiveEfficiency","BlitzDefRank", "TotalPlaysDef", "DefBlitzPerc"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##No Blitz Plays
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+NoBlitzPlaysOff = FBSOff %>% filter(blitz_dog == 0) %>% group_by(OffTeamName) %>% 
+  summarize(NoBlitzPlaysOff = n(), NoBlitzPlaysOffEffPlays = sum(Efficient == 1, na.rm = TRUE), NoBlitzPlaysOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% 
+  mutate(NoBlitzPlaysOffOffensiveEfficiency = NoBlitzPlaysOffEffPlays/NoBlitzPlaysOff, NoBlitzOffRank = rank(desc(NoBlitzPlaysOffOffensiveEfficiency), ties.method="first")) %>% rename(TeamName = OffTeamName)
+NoBlitzPlaysDef = FBSDef %>% filter(blitz_dog == 0) %>% group_by(DefTeamName) %>% 
+  summarize(NoBlitzPlaysDef = n(), NoBlitzPlaysDefEffPlays = sum(Efficient == 1, na.rm = TRUE), NoBlitzPlaysDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% 
+  mutate(NoBlitzPlaysDefOffensiveEfficiency = NoBlitzPlaysDefEffPlays/NoBlitzPlaysDef, NoBlitzDefRank = rank(NoBlitzPlaysDefOffensiveEfficiency, ties.method="first")) %>% rename(TeamName = DefTeamName)
+
+NoBlitzPlaysOff <- merge(NoBlitzPlaysOff, TotalPlaysOff) %>% mutate(OffNoBlitzPerc = NoBlitzPlaysOff / TotalPlaysOff)
+NoBlitzPlaysDef <- merge(NoBlitzPlaysDef, TotalPlaysDef) %>% mutate(DefNoBlitzPerc = NoBlitzPlaysDef / TotalPlaysDef)
+
+NoBlitzPlaysCombined <- merge(NoBlitzPlaysOff, NoBlitzPlaysDef, all.x = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName) 
+
+NoBlitzPlaysCombined <- na.omit(NoBlitzPlaysCombined)
+
+tbl <- reactable(NoBlitzPlaysCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                style = sticky_style,
+                                name = "", filterable = FALSE,
+                                headerStyle = sticky_style,
+                                cell = function(value) {
+                                  div(
+                                    class = "team",
+                                    img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   NoBlitzOffRank= colDef(name = "Rk", width = 50, class = "record1", align = "center"),
+                   NoBlitzDefRank= colDef(name = "Rk", width = 50, class = "record1", align = "center"),
+                   
+                   NoBlitzPlaysOff = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Play #"),
+                   
+                   NoBlitzPlaysOffEffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Eff Plays"),
+                   
+                   NoBlitzPlaysOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                    format = colFormat(digits = 1), 
+                    footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                        },
+                      style = function(value){
+                      normalized <- (value - min(NoBlitzPlaysCombined$NoBlitzPlaysOffYPP))/(max(NoBlitzPlaysCombined$NoBlitzPlaysOffYPP) - min(NoBlitzPlaysCombined$NoBlitzPlaysOffYPP))
+                      color <- col_pal_good(normalized)
+                      list(background = color)
+                       }),
+                   
+                   NoBlitzPlaysOffOffensiveEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                       footer = function(values, digits = 1) {
+                          htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                          style = function(value){
+                            normalized <- (value - min(NoBlitzPlaysCombined$NoBlitzPlaysOffOffensiveEfficiency))/(max(NoBlitzPlaysCombined$NoBlitzPlaysOffOffensiveEfficiency) - min(NoBlitzPlaysCombined$NoBlitzPlaysOffOffensiveEfficiency))
+                            color <- col_pal_good(normalized)
+                             list(background = color)}),
+                   
+                   TotalPlaysOff = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Total Off Plays"),
+                   
+                   OffNoBlitzPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off No Blitz %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                         style = function(value){
+                          normalized <- (value - min(NoBlitzPlaysCombined$OffNoBlitzPerc))/(max(NoBlitzPlaysCombined$OffNoBlitzPerc) - min(NoBlitzPlaysCombined$OffNoBlitzPerc))
+                           color <- col_pal_good(normalized)
+                           list(background = color)}),
+                   
+                   NoBlitzPlaysDef = colDef(align = "center",width = 75,name = "Def Play #"),
+                   
+                   NoBlitzPlaysDefEffPlays = colDef(align = "center",width = 75,name = "Def Eff Plays"),
+                   
+                   NoBlitzPlaysDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                      style = function(value){
+                        normalized <- (value - min(NoBlitzPlaysCombined$NoBlitzPlaysDefYPP))/(max(NoBlitzPlaysCombined$NoBlitzPlaysDefYPP) - min(NoBlitzPlaysCombined$NoBlitzPlaysDefYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)}),
+                   
+                   NoBlitzPlaysDefOffensiveEfficiency = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                       style = function(value){
+                         normalized <- (value - min(NoBlitzPlaysCombined$NoBlitzPlaysDefOffensiveEfficiency))/(max(NoBlitzPlaysCombined$NoBlitzPlaysDefOffensiveEfficiency) - min(NoBlitzPlaysCombined$NoBlitzPlaysDefOffensiveEfficiency))
+                         color <- col_pal_bad(normalized)
+                         list(background = color)}),
+                                  
+                   TotalPlaysDef = colDef(align = "center",width = 75,name = "Total Def Plays"),
+                   
+                   DefNoBlitzPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Def No Blitz %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                     style = function(value){
+                       normalized <- (value - min(NoBlitzPlaysCombined$DefNoBlitzPerc))/(max(NoBlitzPlaysCombined$DefNoBlitzPerc) - min(NoBlitzPlaysCombined$DefNoBlitzPerc))
+                       color <- col_pal_good(normalized)
+                       list(background = color)})),
+                 
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("NoBlitzPlaysOff", "NoBlitzPlaysOffEffPlays", "NoBlitzPlaysOffYPP", "NoBlitzPlaysOffOffensiveEfficiency","NoBlitzOffRank", "TotalPlaysOff", "OffNoBlitzPerc")),
+                   colGroup(name = "Defense", columns = c("NoBlitzPlaysDef", "NoBlitzPlaysDefEffPlays", "NoBlitzPlaysDefYPP", "NoBlitzPlaysDefOffensiveEfficiency","NoBlitzDefRank", "TotalPlaysDef", "DefNoBlitzPerc"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+##Stunt
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+StuntOff <- FBSOff %>% filter(run_pass == "P") %>% group_by(OffTeamName, stunt) %>% summarize(StuntOffPlays = n(), StuntOffEfficiency = sum(Efficient, na.rm = TRUE), StuntOffEfficiencyPerc = mean(Efficient, na.rm = TRUE), StuntOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = OffTeamName)
+StuntDef <- FBSDef %>% filter(run_pass == "P") %>% group_by(DefTeamName, stunt) %>% summarize(StuntDefPlays = n(), StuntDefEfficiency = sum(Efficient, na.rm = TRUE), StuntDefEfficiencyPerc = mean(Efficient, na.rm = TRUE), StuntDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = DefTeamName)
+
+StuntCombined <- merge(StuntOff, StuntDef, all = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)  %>% mutate(stunt= ifelse(stunt == 1, "Yes", "No"))
+
+StuntCombined = na.omit(StuntCombined)
+
+tbl <- reactable(StuntCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     name = "", filterable = FALSE,
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   
+                   stunt = colDef(defaultSortOrder = "desc", filterable = TRUE, align = "center",width = 85, name = "Stunt"),
+                   
+                   StuntOffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 85, name = "Off Plays"),
+                   StuntOffEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 85, name = "Off Eff Plays"),
+                   
+                   StuntOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(StuntCombined$StuntOffYPP))/(max(StuntCombined$StuntOffYPP) - min(StuntCombined$StuntOffYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   StuntOffEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(StuntCombined$StuntOffEfficiencyPerc))/(max(StuntCombined$StuntOffEfficiencyPerc) - min(StuntCombined$StuntOffEfficiencyPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   StuntDefPlays = colDef(defaultSortOrder = "desc", align = "center", width = 75, name = "Def Plays"),
+                   StuntDefEfficiency = colDef(align = "center", width = 75, name = "Def Eff Plays"),
+                   
+                   StuntDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(StuntCombined$StuntDefYPP))/(max(StuntCombined$StuntDefYPP) - min(StuntCombined$StuntDefYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   StuntDefEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(StuntCombined$StuntDefEfficiencyPerc))/(max(StuntCombined$StuntDefEfficiencyPerc) - min(StuntCombined$StuntDefEfficiencyPerc))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("StuntOffPlays", "StuntOffEfficiency", "StuntOffEfficiencyPerc", "StuntOffYPP")),
+                   colGroup(name = "Defense", columns = c("StuntDefPlays", "StuntDefEfficiency", "StuntDefEfficiencyPerc", "StuntDefYPP"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+##MOFOC
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+MOFOCOff <- FBSOff %>% filter(run_pass == "P") %>% group_by(OffTeamName, mofoc_shown, mofoc_played) %>% summarize(MOFOCOffPlays = n(), MOFOCOffEfficiency = sum(Efficient, na.rm = TRUE), MOFOCOffEfficiencyPerc = mean(Efficient, na.rm = TRUE), MOFOCOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = OffTeamName)
+MOFOCDef <- FBSDef %>% filter(run_pass == "P") %>% group_by(DefTeamName, mofoc_shown, mofoc_played) %>% summarize(MOFOCDefPlays = n(), MOFOCDefEfficiency = sum(Efficient, na.rm = TRUE), MOFOCDefEfficiencyPerc = mean(Efficient, na.rm = TRUE), MOFOCDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = DefTeamName)
+
+MOFOCCombined <- merge(MOFOCOff, MOFOCDef, all = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+MOFOCCombined = na.omit(MOFOCCombined)
+
+tbl <- reactable(MOFOCCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     name = "", filterable = FALSE,
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   
+                   mofoc_shown = colDef(defaultSortOrder = "desc", filterable = TRUE, align = "center",width = 85, name = "MF Shown"),
+                   
+                   mofoc_played = colDef(defaultSortOrder = "desc", filterable = TRUE, align = "center",width = 85, name = "MF Played"),
+                   
+                   MOFOCOffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Plays"),
+                   MOFOCOffEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 75, name = "Off Eff Plays"),
+                   
+                   MOFOCOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(MOFOCCombined$MOFOCOffYPP))/(max(MOFOCCombined$MOFOCOffYPP) - min(MOFOCCombined$MOFOCOffYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   MOFOCOffEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(MOFOCCombined$MOFOCOffEfficiencyPerc))/(max(MOFOCCombined$MOFOCOffEfficiencyPerc) - min(MOFOCCombined$MOFOCOffEfficiencyPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   MOFOCDefPlays = colDef(defaultSortOrder = "desc", align = "center", width = 75, name = "Def Plays"),
+                   MOFOCDefEfficiency = colDef(align = "center", width = 75, name = "Def Eff Plays"),
+                   
+                   MOFOCDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(MOFOCCombined$MOFOCDefYPP))/(max(MOFOCCombined$MOFOCDefYPP) - min(MOFOCCombined$MOFOCDefYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   MOFOCDefEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(MOFOCCombined$MOFOCDefEfficiencyPerc))/(max(MOFOCCombined$MOFOCDefEfficiencyPerc) - min(MOFOCCombined$MOFOCDefEfficiencyPerc))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("MOFOCOffPlays", "MOFOCOffEfficiency", "MOFOCOffEfficiencyPerc", "MOFOCOffYPP")),
+                   colGroup(name = "Defense", columns = c("MOFOCDefPlays", "MOFOCDefEfficiency", "MOFOCDefEfficiencyPerc", "MOFOCDefYPP"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##QB Moved
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+QBMovedOff <- FBSOff %>% filter(run_pass == "P") %>% group_by(OffTeamName, quarterback_moved_off_spot) %>% summarize(QBMovedOffPlays = n(), QBMovedOffEfficiency = sum(Efficient, na.rm = TRUE), QBMovedOffEfficiencyPerc = mean(Efficient, na.rm = TRUE), QBMovedOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = OffTeamName)
+QBMovedDef <- FBSDef %>% filter(run_pass == "P") %>% group_by(DefTeamName, quarterback_moved_off_spot) %>% summarize(QBMovedDefPlays = n(), QBMovedDefEfficiency = sum(Efficient, na.rm = TRUE), QBMovedDefEfficiencyPerc = mean(Efficient, na.rm = TRUE), QBMovedDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = DefTeamName)
+
+QBMovedCombined <- merge(QBMovedOff, QBMovedDef, all = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName) %>% mutate(quarterback_moved_off_spot = ifelse(quarterback_moved_off_spot == 1, "Yes", "No"))
+
+QBMovedCombined = na.omit(QBMovedCombined)
+
+tbl <- reactable(QBMovedCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     name = "", filterable = FALSE,
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   
+                   quarterback_moved_off_spot = colDef(defaultSortOrder = "desc", filterable = TRUE, align = "center",width = 85, name = "QB Moved"),
+                   
+                   QBMovedOffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 85, name = "Off Plays"),
+                   QBMovedOffEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 85, name = "Off Eff Plays"),
+                   
+                   QBMovedOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(QBMovedCombined$QBMovedOffYPP))/(max(QBMovedCombined$QBMovedOffYPP) - min(QBMovedCombined$QBMovedOffYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   QBMovedOffEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(QBMovedCombined$QBMovedOffEfficiencyPerc))/(max(QBMovedCombined$QBMovedOffEfficiencyPerc) - min(QBMovedCombined$QBMovedOffEfficiencyPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   QBMovedDefPlays = colDef(defaultSortOrder = "desc", align = "center", width = 75, name = "Def Plays"),
+                   QBMovedDefEfficiency = colDef(align = "center", width = 75, name = "Def Eff Plays"),
+                   
+                   QBMovedDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(QBMovedCombined$QBMovedDefYPP))/(max(QBMovedCombined$QBMovedDefYPP) - min(QBMovedCombined$QBMovedDefYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   QBMovedDefEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(QBMovedCombined$QBMovedDefEfficiencyPerc))/(max(QBMovedCombined$QBMovedDefEfficiencyPerc) - min(QBMovedCombined$QBMovedDefEfficiencyPerc))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("QBMovedOffPlays", "QBMovedOffEfficiency", "QBMovedOffEfficiencyPerc", "QBMovedOffYPP")),
+                   colGroup(name = "Defense", columns = c("QBMovedDefPlays", "QBMovedDefEfficiency", "QBMovedDefEfficiencyPerc", "QBMovedDefYPP"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##QB Scramble
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+QBScrambleOff <- FBSOff %>% filter(run_pass == "P") %>% group_by(OffTeamName, quarterback_scramble) %>% summarize(QBscrambleOffPlays = n(), QBscrambleOffEfficiency = sum(Efficient, na.rm = TRUE), QBscrambleOffEfficiencyPerc = mean(Efficient, na.rm = TRUE), QBscrambleOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = OffTeamName)
+QBScrambleDef <- FBSDef %>% filter(run_pass == "P") %>% group_by(DefTeamName, quarterback_scramble) %>% summarize(QBscrambleDefPlays = n(), QBscrambleDefEfficiency = sum(Efficient, na.rm = TRUE), QBscrambleDefEfficiencyPerc = mean(Efficient, na.rm = TRUE), QBscrambleDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = DefTeamName)
+
+QBScrambleCombined <- merge(QBScrambleOff, QBScrambleDef, all = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+QBScrambleCombined = na.omit(QBScrambleCombined)
+
+tbl <- reactable(QBScrambleCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                     style = sticky_style,
+                                     name = "", filterable = FALSE,
+                                     headerStyle = sticky_style,
+                                     cell = function(value) {
+                                       div(
+                                         class = "team",
+                                         img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   
+                   quarterback_scramble = colDef(defaultSortOrder = "desc", filterable = TRUE, align = "center",width = 85, name = "QB Scram"),
+                   
+                   QBscrambleOffPlays = colDef(defaultSortOrder = "desc", align = "center",width = 85, name = "Off Plays"),
+                   QBscrambleOffEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 85, name = "Off Eff Plays"),
+                   
+                   QBscrambleOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(QBScrambleCombined$QBscrambleOffYPP))/(max(QBScrambleCombined$QBscrambleOffYPP) - min(QBScrambleCombined$QBscrambleOffYPP))
+                                               color <- col_pal_good(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   QBscrambleOffEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(QBScrambleCombined$QBscrambleOffEfficiencyPerc))/(max(QBScrambleCombined$QBscrambleOffEfficiencyPerc) - min(QBScrambleCombined$QBscrambleOffEfficiencyPerc))
+                                                               color <- col_pal_good(normalized)
+                                                               list(background = color)
+                                                             }),
+                   
+                   QBscrambleDefPlays = colDef(defaultSortOrder = "desc", align = "center", width = 75, name = "Def Plays"),
+                   QBscrambleDefEfficiency = colDef(align = "center", width = 75, name = "Def Eff Plays"),
+                   
+                   QBscrambleDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                                             format = colFormat(digits = 1), 
+                                             footer = function(values) {
+                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                             },
+                                             style = function(value){
+                                               normalized <- (value - min(QBScrambleCombined$QBscrambleDefYPP))/(max(QBScrambleCombined$QBscrambleDefYPP) - min(QBScrambleCombined$QBscrambleDefYPP))
+                                               color <- col_pal_bad(normalized)
+                                               list(background = color)
+                                             }),
+                   
+                   QBscrambleDefEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                                                             footer = function(values, digits = 1) {
+                                                               htmltools::tags$b(sprintf("%.3f", mean(values)))
+                                                             },
+                                                             style = function(value){
+                                                               normalized <- (value - min(QBScrambleCombined$QBscrambleDefEfficiencyPerc))/(max(QBScrambleCombined$QBscrambleDefEfficiencyPerc) - min(QBScrambleCombined$QBscrambleDefEfficiencyPerc))
+                                                               color <- col_pal_bad(normalized)
+                                                               list(background = color)
+                                                             })),
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("QBscrambleOffPlays", "QBscrambleOffEfficiency", "QBscrambleOffEfficiencyPerc", "QBscrambleOffYPP")),
+                   colGroup(name = "Defense", columns = c("QBscrambleDefPlays", "QBscrambleDefEfficiency", "QBscrambleDefEfficiencyPerc", "QBscrambleDefYPP"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+##QB Hit or Hurry
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+HitHurryPlaysOff <- FBSOff %>% filter(!is.na(hit_players) | !is.na(hurry_players)) %>% group_by(OffTeamName) %>% 
+  summarize(HitHurryPlaysOff = n(), HitHurryPlaysOffEffPlays = sum(Efficient == 1, na.rm = TRUE), HitHurryPlaysOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% mutate(HitHurryPlaysOffOffensiveEfficiency = HitHurryPlaysOffEffPlays/HitHurryPlaysOff, HitHurryPlaysOffRank = rank(desc(HitHurryPlaysOffOffensiveEfficiency), ties.method="first")) %>% rename(TeamName = OffTeamName)
+HitHurryPlaysDef <- FBSDef %>% filter(!is.na(hit_players) | !is.na(hurry_players)) %>% group_by(DefTeamName) %>% 
+  summarize(HitHurryPlaysDef = n(), HitHurryPlaysDefEffPlays = sum(Efficient == 1, na.rm = TRUE), HitHurryPlaysDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% mutate(HitHurryPlaysDefOffensiveEfficiency = HitHurryPlaysDefEffPlays/HitHurryPlaysDef, HitHurryPlaysDefRank = rank(HitHurryPlaysDefOffensiveEfficiency, ties.method="first")) %>% rename(TeamName = DefTeamName)
+
+HitHurryCombined = merge(HitHurryPlaysOff, HitHurryPlaysDef, all.x = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName) 
+
+HitHurryCombined <- na.omit(HitHurryCombined)
+
+tbl <- reactable(HitHurryCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                       style = sticky_style, filterable = FALSE,
+                       name = "",
+                       headerStyle = sticky_style,
+                       cell = function(value) {
+                         div(
+                           class = "team",
+                           img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value)))}),
+                   
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   HitHurryPlaysOffRank= colDef(name = "Rk", width = 50, class = "record1", align = "center"),
+                   HitHurryPlaysDefRank= colDef(name = "Rk", width = 50, class = "record1", align = "center"),
+                   
+                   HitHurryPlaysOff = colDef(align = "center",width = 75,name = "Off Play #"),
+                   
+                   HitHurryPlaysOffEffPlays = colDef(align = "center",width = 75,name = "Off Eff Plays"),
+                   
+                   HitHurryPlaysOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                    format = colFormat(digits = 1), 
+                    footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                        },
+                      style = function(value){
+                      normalized <- (value - min(HitHurryCombined$HitHurryPlaysOffYPP))/(max(HitHurryCombined$HitHurryPlaysOffYPP) - min(HitHurryCombined$HitHurryPlaysOffYPP))
+                      color <- col_pal_good(normalized)
+                      list(background = color)
+                       }),
+                   
+                   HitHurryPlaysOffOffensiveEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                       footer = function(values, digits = 1) {
+                          htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                          style = function(value){
+                            normalized <- (value - min(HitHurryCombined$HitHurryPlaysOffOffensiveEfficiency))/(max(HitHurryCombined$HitHurryPlaysOffOffensiveEfficiency) - min(HitHurryCombined$HitHurryPlaysOffOffensiveEfficiency))
+                            color <- col_pal_good(normalized)
+                             list(background = color)}),
+            
+                   HitHurryPlaysDef = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Def Play #"),
+                   
+                   HitHurryPlaysDefEffPlays = colDef(align = "center",width = 75,name = "Def Eff Plays"),
+                   
+                   HitHurryPlaysDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                      style = function(value){
+                        normalized <- (value - min(HitHurryCombined$HitHurryPlaysDefYPP))/(max(HitHurryCombined$HitHurryPlaysDefYPP) - min(HitHurryCombined$HitHurryPlaysDefYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)}),
+                   
+                   HitHurryPlaysDefOffensiveEfficiency = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                       style = function(value){
+                         normalized <- (value - min(HitHurryCombined$HitHurryPlaysDefOffensiveEfficiency))/(max(HitHurryCombined$HitHurryPlaysDefOffensiveEfficiency) - min(HitHurryCombined$HitHurryPlaysDefOffensiveEfficiency))
+                         color <- col_pal_bad(normalized)
+                         list(background = color)})),
+                 
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("HitHurryPlaysOff", "HitHurryPlaysOffEffPlays", "HitHurryPlaysOffYPP", "HitHurryPlaysOffOffensiveEfficiency","HitHurryPlaysOffRank")),
+                   colGroup(name = "Defense", columns = c("HitHurryPlaysDef", "HitHurryPlaysDefEffPlays", "HitHurryPlaysDefYPP", "HitHurryPlaysDefOffensiveEfficiency","HitHurryPlaysDefRank"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##Pass Direction
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+PassDirectionOff <- FBSOff %>% filter(run_pass == "P") %>% filter(pass_direction != "X") %>% group_by(OffTeamName, pass_direction) %>% summarize(PassDirectionOffPlays = n(), PassDirectionOffEfficiency = sum(Efficient, na.rm = TRUE), PassDirectionOffEfficiencyPerc = mean(Efficient, na.rm = TRUE), PassDirectionOffYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = OffTeamName)
+PassDirectionDef <- FBSDef %>% filter(run_pass == "P") %>% filter(pass_direction != "X") %>% group_by(DefTeamName, pass_direction) %>% summarize(PassDirectionDefPlays = n(), PassDirectionDefEfficiency = sum(Efficient, na.rm = TRUE), PassDirectionDefEfficiencyPerc = mean(Efficient, na.rm = TRUE), PassDirectionDefYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(TeamName = DefTeamName)
+
+PassDirectionCombined <- merge(PassDirectionOff, PassDirectionDef, by = c("TeamName", "pass_direction")) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName) 
+
+PassDirectionCombined <- na.omit(PassDirectionCombined)
+
+tbl <- reactable(PassDirectionCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                       style = sticky_style, filterable = FALSE,
+                       name = "",
+                       headerStyle = sticky_style,
+                       cell = function(value) {
+                         div(
+                           class = "team",
+                           img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value)))}),
+                   
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   pass_direction = colDef(name = "Pass Dir", filterable = TRUE, width = 100, class = "team-name", align = "center"),
+                  
+                   
+                   PassDirectionOffPlays = colDef(align = "center", width = 75,name = "Off Play #"),
+                   
+                   PassDirectionOffEfficiency = colDef(align = "center", width = 75,name = "Off Eff Plays"),
+                   
+                   PassDirectionOffYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                    format = colFormat(digits = 1), 
+                    footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                        },
+                      style = function(value){
+                      normalized <- (value - min(PassDirectionCombined$PassDirectionOffYPP))/(max(PassDirectionCombined$PassDirectionOffYPP) - min(PassDirectionCombined$PassDirectionOffYPP))
+                      color <- col_pal_good(normalized)
+                      list(background = color)
+                       }),
+                   
+                   PassDirectionOffEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                       footer = function(values, digits = 1) {
+                          htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                          style = function(value){
+                            normalized <- (value - min(PassDirectionCombined$PassDirectionOffEfficiencyPerc))/(max(PassDirectionCombined$PassDirectionOffEfficiencyPerc) - min(PassDirectionCombined$PassDirectionOffEfficiencyPerc))
+                            color <- col_pal_good(normalized)
+                             list(background = color)}),
+            
+                   PassDirectionDefPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Def Play #"),
+                   
+                   PassDirectionDefEfficiency = colDef(align = "center",width = 75,name = "Def Eff Plays"),
+                   
+                   PassDirectionDefYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                      style = function(value){
+                        normalized <- (value - min(PassDirectionCombined$PassDirectionDefYPP))/(max(PassDirectionCombined$PassDirectionDefYPP) - min(PassDirectionCombined$PassDirectionDefYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)}),
+                   
+                   PassDirectionDefEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                       style = function(value){
+                         normalized <- (value - min(PassDirectionCombined$PassDirectionDefEfficiencyPerc))/(max(PassDirectionCombined$PassDirectionDefEfficiencyPerc) - min(PassDirectionCombined$PassDirectionDefEfficiencyPerc))
+                         color <- col_pal_bad(normalized)
+                         list(background = color)})),
+                 
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("PassDirectionOffPlays", "PassDirectionOffEfficiency", "PassDirectionOffEfficiencyPerc", "PassDirectionOffYPP")),
+                   colGroup(name = "Defense", columns = c("PassDirectionDefPlays", "PassDirectionDefEfficiency", "PassDirectionDefEfficiencyPerc", "PassDirectionDefYPP"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##Missed Tackles
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+MissTacklePlaysOff = FBSOff %>% filter(!is.na(missed_tackle)) %>% group_by(OffTeamName) %>%
+  summarize(MissTacklePlaysOff = n()) %>% rename(TeamName = OffTeamName)
+MissTacklePlaysOff <- merge(MissTacklePlaysOff, TotalPlaysOff, all.x = TRUE)
+MissTacklePlaysOff <- MissTacklePlaysOff %>% mutate(MissTacklePercOff = MissTacklePlaysOff/TotalPlaysOff, MissTacklePlaysOffRank = rank(desc(MissTacklePlaysOff), ties.method="first")) 
+MissTacklePlaysDef = FBSDef %>% filter(!is.na(missed_tackle)) %>% group_by(DefTeamName) %>%
+  summarize(MissTacklePlaysDef = n()) %>% rename(TeamName = DefTeamName)
+MissTacklePlaysDef <- merge(MissTacklePlaysDef, TotalPlaysDef, all.x = TRUE)
+MissTacklePlaysDef <- MissTacklePlaysDef %>% mutate(MissTacklePercDef = MissTacklePlaysDef/TotalPlaysDef, MissTacklePlaysDefRank = rank(MissTacklePlaysDef, ties.method="first")) 
+
+MissTackleCombined = merge(MissTacklePlaysOff, MissTacklePlaysDef, all.x = TRUE) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName) 
+
+MissTackleCombined <- na.omit(MissTackleCombined)
+tbl <- reactable(MissTackleCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                                style = sticky_style, filterable = FALSE,
+                                name = "",
+                                headerStyle = sticky_style,
+                                cell = function(value) {
+                                  div(
+                                    class = "team",
+                                    img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value))
+                                       )
+                                     }
+                   ),
+                   
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   MissTacklePlaysOffRank = colDef(name = "Rk", width = 50, class = "record1", align = "center"),
+                   MissTacklePlaysDefRank = colDef(name = "Rk", width = 50, class = "record1", align = "center"),
+                   
+                   MissTacklePlaysOff = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "MT Plays Off"),
+                   
+                   TotalPlaysOff = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Total Off Plays"),
+                   
+                   MissTacklePercOff = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off MT %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                         style = function(value){
+                          normalized <- (value - min(MissTackleCombined$MissTacklePercOff))/(max(MissTackleCombined$MissTacklePercOff) - min(MissTackleCombined$MissTacklePercOff))
+                           color <- col_pal_good(normalized)
+                           list(background = color)}),
+                   
+                   MissTacklePlaysDef = colDef(align = "center",width = 75,name = "MT Plays Def"),
+                   
+                   TotalPlaysDef = colDef(align = "center",width = 75,name = "Total Def Plays"),
+                                     
+                   MissTacklePercDef = colDef(width = 75, align = "center", name = "Def MT %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                     style = function(value){
+                       normalized <- (value - min(MissTackleCombined$MissTacklePercDef))/(max(MissTackleCombined$MissTacklePercDef) - min(MissTackleCombined$MissTacklePercDef))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)})),
+                 
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("MissTacklePlaysOff", "TotalPlaysOff", "MissTacklePercOff", "MissTacklePlaysOffRank")),
+                   colGroup(name = "Defense", columns = c("MissTacklePlaysDef", "TotalPlaysDef", "MissTacklePercDef", "MissTacklePlaysDefRank"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##Quarter Breakdown
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+QuarterOff <- FBSOff %>% group_by(OffTeamName, quarter) %>% summarize(OffQuarterPlays = n(), OffQuarterEfficiency = sum(Efficient, na.rm = TRUE), OffQuarterEfficiencyPerc = mean(Efficient, na.rm = TRUE), OffQuarterYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(Quarter = quarter, TeamName = OffTeamName)
+QuarterDef <- FBSDef %>% group_by(DefTeamName, quarter) %>% summarize(DefQuarterPlays = n(), DefQuarterEfficiency = sum(Efficient, na.rm = TRUE), DefQuarterEfficiencyPerc = mean(Efficient, na.rm = TRUE), DefQuarterYPP = mean(Gain.Loss, na.rm = TRUE)) %>% rename(Quarter = quarter, TeamName = DefTeamName)
+
+QuarterCombined <- merge(QuarterOff, QuarterDef, by = c("TeamName", "Quarter")) %>% filter(Quarter %in% c(1,2,3,4)) %>% merge(dat1, all.x = TRUE) %>% select(-TeamCode, -PrimaryColor, -SecondaryColor) %>% relocate(teamcode, .after = TeamName)
+
+QuarterCombined <- na.omit(QuarterCombined)
+tbl <- reactable(QuarterCombined,
+                 columns = list(
+                   teamcode = colDef(align = "center", width = 75,
+                       style = sticky_style, filterable = FALSE,
+                       name = "",
+                       headerStyle = sticky_style,
+                       cell = function(value) {
+                         div(
+                           class = "team",
+                           img(class = "flag", alt = paste(value, "logo"), src = sprintf("http://a.espncdn.com/i/teamlogos/ncaa/500/%s.png", value)))}),
+                   
+                   TeamName = colDef(name = "Team", width = 150, filterable = TRUE, class = "team-name", align = "left"),
+                   Conf = colDef(name = "Conf", width = 100, filterable = TRUE, class = "team-name", align = "center"),
+                   Quarter = colDef(name = "Quarter", filterable = TRUE, width = 100, class = "team-name", align = "center"),
+
+                   OffQuarterPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Play #"),
+                   
+                   OffQuarterEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Off Eff Plays"),
+                   
+                   OffQuarterYPP = colDef(defaultSortOrder = "desc", name = "Off YPP", align = "center", width = 75,
+                    format = colFormat(digits = 1), 
+                    footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                        },
+                      style = function(value){
+                      normalized <- (value - min(QuarterCombined$OffQuarterYPP))/(max(QuarterCombined$OffQuarterYPP) - min(QuarterCombined$OffQuarterYPP))
+                      color <- col_pal_good(normalized)
+                      list(background = color)
+                       }),
+                   
+                   OffQuarterEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Off Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                       footer = function(values, digits = 1) {
+                          htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                          style = function(value){
+                            normalized <- (value - min(QuarterCombined$OffQuarterEfficiencyPerc))/(max(QuarterCombined$OffQuarterEfficiencyPerc) - min(QuarterCombined$OffQuarterEfficiencyPerc))
+                            color <- col_pal_good(normalized)
+                             list(background = color)}),
+            
+                   DefQuarterPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Def Play #"),
+                   
+                   DefQuarterEfficiency = colDef(align = "center",width = 75,name = "Def Eff Plays"),
+                   
+                   DefQuarterYPP = colDef(name = "Def YPP", align = "center", width = 75,
+                     format = colFormat(digits = 1), 
+                     footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                      style = function(value){
+                        normalized <- (value - min(QuarterCombined$DefQuarterYPP))/(max(QuarterCombined$DefQuarterYPP) - min(QuarterCombined$DefQuarterYPP))
+                       color <- col_pal_bad(normalized)
+                       list(background = color)}),
+                   
+                   DefQuarterEfficiencyPerc = colDef(width = 75, align = "center", name = "Def Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                     footer = function(values, digits = 1) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                       style = function(value){
+                         normalized <- (value - min(QuarterCombined$DefQuarterEfficiencyPerc))/(max(QuarterCombined$DefQuarterEfficiencyPerc) - min(QuarterCombined$DefQuarterEfficiencyPerc))
+                         color <- col_pal_bad(normalized)
+                         list(background = color)})),
+                 
+                 columnGroups = list(
+                   colGroup(name = "Offense", columns = c("OffQuarterPlays", "OffQuarterEfficiency", "OffQuarterEfficiencyPerc", "OffQuarterYPP")),
+                   colGroup(name = "Defense", columns = c("DefQuarterPlays", "DefQuarterEfficiency", "DefQuarterEfficiencyPerc", "DefQuarterYPP"))),
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+
+```
+
+##UVA Off Skill Groupings
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+PersonnelGroupings <- FBSOff %>% filter(OffTeamName == "Virginia") %>% group_by(offensive_personnel_skill) %>% 
+  summarize(Plays = n(), EfficientPlays = sum(Efficient, na.rm = TRUE), OverallPersEfficiency = mean(Efficient, na.rm = TRUE), OverallPersYPP = mean(Gain.Loss, na.rm = TRUE))
+
+PersonnelGroupings <- na.omit(PersonnelGroupings)
+tbl <- reactable(PersonnelGroupings,
+                 columns = list(
+                   offensive_personnel_skill = colDef(name = "Skill Players", filterable = TRUE, style = sticky_style, headerStyle = sticky_style, width = 400, class = "team-name", align = "left"),
+                  
+                   Plays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Total Plays"),
+                   
+                   EfficientPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Eff Plays"),
+                   
+                    OverallPersYPP = colDef(defaultSortOrder = "desc", name = "YPP", align = "center", width = 75,
+                    format = colFormat(digits = 1), 
+                    footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                        },
+                      style = function(value){
+                      normalized <- (value - min(PersonnelGroupings$OverallPersYPP))/(max(PersonnelGroupings$OverallPersYPP) - min(PersonnelGroupings$OverallPersYPP))
+                      color <- col_pal_good(normalized)
+                      list(background = color)
+                       }),
+                   
+                   OverallPersEfficiency = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                       footer = function(values, digits = 1) {
+                          htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                          style = function(value){
+                            normalized <- (value - min(PersonnelGroupings$OverallPersEfficiency))/(max(PersonnelGroupings$OverallPersEfficiency) - min(PersonnelGroupings$OverallPersEfficiency))
+                            color <- col_pal_good(normalized)
+                             list(background = color)})),
+                 
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+##UVA Off Personnel Group
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+VirginiaPers <- FBSOff %>% filter(OffTeamName == "Virginia") %>% group_by(offensive_personnel_basic) %>% summarize(OffPersPlays = n(), OffPersPlaysEfficiency = sum(Efficient, na.rm = TRUE), OffPersPlaysEfficiencyPerc = mean(Efficient, na.rm = TRUE), OffPersPlaysYPP = mean(Gain.Loss, na.rm = TRUE))
+
+VirginiaPers <- na.omit(VirginiaPers)
+tbl <- reactable(VirginiaPers,
+                 columns = list(
+                   offensive_personnel_basic = colDef(name = "Offensive Personnel", style = sticky_style, headerStyle = sticky_style, width = 125, class = "team-name", align = "left"),
+                  
+                   OffPersPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Plays"),
+                   
+                   OffPersPlaysEfficiency = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Eff Plays"),
+                   
+                    OffPersPlaysYPP = colDef(defaultSortOrder = "desc", name = "YPP", align = "center", width = 75,
+                    format = colFormat(digits = 1), 
+                    footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                        },
+                      style = function(value){
+                      normalized <- (value - min(VirginiaPers$OffPersPlaysYPP))/(max(VirginiaPers$OffPersPlaysYPP) - min(VirginiaPers$OffPersPlaysYPP))
+                      color <- col_pal_good(normalized)
+                      list(background = color)
+                       }),
+                   
+                   OffPersPlaysEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                       footer = function(values, digits = 1) {
+                          htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                          style = function(value){
+                            normalized <- (value - min(VirginiaPers$OffPersPlaysEfficiencyPerc))/(max(VirginiaPers$OffPersPlaysEfficiencyPerc) - min(VirginiaPers$OffPersPlaysEfficiencyPerc))
+                            color <- col_pal_good(normalized)
+                             list(background = color)})),
+                 
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##UVA Def Groups
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+VirginiaDefSimple <- FBSDef %>% filter(DefTeamName == "Virginia") %>% group_by(defensive_personnel) %>% summarize(DefPersPlays = n(), DefPersPlaysEfficiency = sum(Efficient, na.rm = TRUE), DefPersPlaysEfficiencyPerc = mean(Efficient, na.rm = TRUE), DefPersPlaysYPP = mean(Gain.Loss, na.rm = TRUE))
+
+VirginiaDefSimple <- na.omit(VirginiaDefSimple)
+tbl <- reactable(VirginiaDefSimple,
+                 columns = list(
+                   defensive_personnel = colDef(name = "Defensive Group", style = sticky_style, headerStyle = sticky_style, width = 125, class = "team-name", align = "left"),
+                  
+                   DefPersPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Plays"),
+                   
+                   DefPersPlaysEfficiency = colDef(align = "center",width = 75,name = "Eff Plays"),
+                   
+                    DefPersPlaysYPP = colDef(name = "YPP", align = "center", width = 75,
+                    format = colFormat(digits = 1), 
+                    footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                        },
+                      style = function(value){
+                      normalized <- (value - min(VirginiaDefSimple$DefPersPlaysYPP))/(max(VirginiaDefSimple$DefPersPlaysYPP) - min(VirginiaDefSimple$DefPersPlaysYPP))
+                      color <- col_pal_bad(normalized)
+                      list(background = color)
+                       }),
+                   
+                   DefPersPlaysEfficiencyPerc = colDef(defaultSortOrder = "desc", width = 75, align = "center", name = "Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                       footer = function(values, digits = 1) {
+                          htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                          style = function(value){
+                            normalized <- (value - min(VirginiaDefSimple$DefPersPlaysEfficiencyPerc))/(max(VirginiaDefSimple$DefPersPlaysEfficiencyPerc) - min(VirginiaDefSimple$DefPersPlaysEfficiencyPerc))
+                            color <- col_pal_bad(normalized)
+                             list(background = color)})),
+                 
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+
+```
+
+##Def Grouping vs Off Personnel
+```{r, echo= FALSE, warning=FALSE, message = FALSE}
+DefPersVsOffPers <- FBSDef %>% filter(DefTeamName == "Virginia") %>% group_by(defensive_personnel, offensive_personnel_basic) %>% summarize(DefPersVsOffPersPlays = n(), DefPersVsOffPersPlaysEfficiency = sum(Efficient, na.rm = TRUE), DefPersVsOffPersPersPlaysEfficiencyPerc = mean(Efficient, na.rm = TRUE), DefPersVsOffPersPersPlaysYPP = mean(Gain.Loss, na.rm = TRUE))
+
+DefPersVsOffPers <- na.omit(DefPersVsOffPers)
+tbl <- reactable(DefPersVsOffPers,
+                 columns = list(
+                   defensive_personnel = colDef(name = "Defensive Group", filterable = TRUE, style = sticky_style, headerStyle = sticky_style, width = 125, class = "team-name", align = "left"),
+                  
+                   offensive_personnel_basic = colDef(align = "center",width = 75,name = "Off Pers"),
+                   
+                   DefPersVsOffPersPlays = colDef(defaultSortOrder = "desc", align = "center",width = 75,name = "Plays"),
+                   
+                   DefPersVsOffPersPlaysEfficiency = colDef(align = "center",width = 75,name = "Eff Plays"),
+                   
+                    DefPersVsOffPersPersPlaysYPP = colDef(name = "YPP", align = "center", width = 75,
+                    format = colFormat(digits = 1), 
+                    footer = function(values) {
+                       htmltools::tags$b(sprintf("%.3f", mean(values)))
+                        },
+                      style = function(value){
+                      normalized <- (value - min(DefPersVsOffPers$DefPersVsOffPersPersPlaysYPP))/(max(DefPersVsOffPers$DefPersVsOffPersPersPlaysYPP) - min(DefPersVsOffPers$DefPersVsOffPersPersPlaysYPP))
+                      color <- col_pal_bad(normalized)
+                      list(background = color)
+                       }),
+                   
+                   DefPersVsOffPersPersPlaysEfficiencyPerc = colDef(width = 75, align = "center", name = "Eff %", format = colFormat(percent = TRUE, digits = 1), 
+                       footer = function(values, digits = 1) {
+                          htmltools::tags$b(sprintf("%.3f", mean(values)))},
+                          style = function(value){
+                            normalized <- (value - min(DefPersVsOffPers$DefPersVsOffPersPersPlaysEfficiencyPerc))/(max(DefPersVsOffPers$DefPersVsOffPersPersPlaysEfficiencyPerc) - min(DefPersVsOffPers$DefPersVsOffPersPersPlaysEfficiencyPerc))
+                            color <- col_pal_bad(normalized)
+                             list(background = color)})),
+                 
+                 bordered = TRUE,
+                 highlight = TRUE,
+                 searchable = TRUE,
+                 showPageSizeOptions = TRUE, 
+                 pageSizeOptions = c(25, 50, 100), 
+                 defaultPageSize = 25,
+                 striped = TRUE)
+
+div(class = "standings",
+  tbl
+)
+
+```
+
+
+```{css, echo=FALSE}
+.border-left {
+  border-left: 3px solid #555;
+}
+
+.standings {
+  font-family: Karla, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 18px;
+}
+
+.title h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.header {
+  border-bottom-color: #555;
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: uppercase;
+}
+
+.flag {
+  margin-right: 8px;
+  height: 35px;
+}
+
+.team-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.record {
+  margin-left: 5px;
+  color: #999;
+  font-size: 13px;
+}
+
+.record1 {
+  font-size: 14px;
+  text-align: middle;
+}
+
+h1.title {
+  font-size: 38px;
+  font-family: Karla, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  text-align: center;
+}
+
+.header1 {
+  padding: 20px;
+  text-align: left;
+  background: #4d0099;
+  color: white;
+  font-size: 30px;
+  font-family: Karla, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+```
+
