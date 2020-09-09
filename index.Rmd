@@ -8,13 +8,12 @@ Welcome to the Virginia Cavaliers website. Here is where reports and analysis wi
  
 
 #### **Site Navigation**  
-* [About](about.html)
-* [Drive Summaries](test_table.html)
+* [2020 NCAA Stats](ncaa_stats_2020.html)
 <br>  
  
   
 #### **2020 Opponents**
-Select a team to go to their page. I imagine that eventually we can have a page for each opponent that includes multiple tables and other useful information. We can build these out over time, and the buttons below would link to the pages as we added them.
+The images below will link to opponent-specific pages as they are prepared. 
 
 <img width="225" alt="Virginia Tech" src="pictures/VT.png">
 <img width="225" alt="Clemson" src="pictures/Clemson.png">
